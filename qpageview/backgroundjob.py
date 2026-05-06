@@ -151,5 +151,3 @@ def run(func: Callable[[], Any], callback: FinalizeCallback = None):
     j.work = func
     j.finalize = callback
     j.start()
-
-

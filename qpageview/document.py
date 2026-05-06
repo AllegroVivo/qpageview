@@ -54,6 +54,9 @@ if TYPE_CHECKING:
     from .render import AbstractRenderer
 
 TPage = TypeVar("TPage", bound="AbstractPage")
+TSource = TypeVar("TSource")
+VSource = TypeVar("VSource")
+
 URLDict = Dict[str, Dict[int, List["Area"]]]
 
 class Document:
@@ -181,8 +184,6 @@ class AbstractSourceDocument(Document):
         assert self._urls  # for type checker - SP
         return self._urls
 
-TSource = TypeVar("TSource", bound="AbstractSourceDocument")
-
 class SingleSourceDocument(AbstractSourceDocument):
     """A Document that loads its pages from a single file or source."""
     def __init__(
@@ -212,8 +213,6 @@ class SingleSourceDocument(AbstractSourceDocument):
         """Delete all cached pages, and clear filename or source object."""
         self.invalidate()
         self._source = None
-
-VSource = TypeVar("VSource", bound="AbstractSourceDocument")
 
 class MultiSourceDocument(AbstractSourceDocument):
     """A Document that loads every page from its own file or source."""

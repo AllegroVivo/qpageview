@@ -25,7 +25,7 @@ A Page intended to display the visual difference between other pages.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Sequence, List, Optional, Type
+from typing import TYPE_CHECKING, Sequence, List, Optional, Type, Iterator
 
 import itertools
 
@@ -56,7 +56,7 @@ class DiffPage(ImagePrintPageMixin, MultiPage):
         pageLists: List[List[AbstractPage]],
         renderer: Optional[AbstractRenderer] = None,
         pad: Type[AbstractPage] = BlankPage
-    ):
+    ) -> Iterator[DiffPage]:
         """Reimplemented to adapt the page sizes."""
         it = itertools.zip_longest(*pageLists) if pad else zip(*pageLists)
         for pages in it:
@@ -81,7 +81,7 @@ class DiffPage(ImagePrintPageMixin, MultiPage):
 
 class DiffDocument(MultiPageDocument):
     """A Document showing the differences between documents, set as sources."""
-    pageClass = DiffPage
+    pageClass: Type[DiffPage] = DiffPage
 
 
 class DiffRenderer(MultiPageRenderer):

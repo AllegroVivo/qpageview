@@ -29,7 +29,8 @@ from typing import TYPE_CHECKING, Literal, Union, Optional, Callable
 
 from PySide6.QtCore import QEvent, Qt, QPoint
 from PySide6.QtGui import (
-    QColor, QCursor, QPainter, QPalette, QPen, QRegion, QTransform, QResizeEvent, QMoveEvent, QMouseEvent, QWheelEvent, QPaintEvent
+    QColor, QCursor, QPainter, QPalette, QPen, QRegion, QTransform,
+    QResizeEvent, QMoveEvent, QMouseEvent, QWheelEvent, QPaintEvent
 )
 from PySide6.QtWidgets import QWidget
 

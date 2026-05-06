@@ -34,7 +34,10 @@ from PySide6.QtGui import QImage
 if TYPE_CHECKING:
     from .image import ImagePage
     from .render import Key, Tile
+    # noinspection PyUnusedImports
+    from .constants import Rotation
 
+CacheDict = WeakKeyDictionary[Any, Dict[Any, Dict[Tuple["Rotation", int, int], Dict["Tile", "ImageEntry"]]]]
 
 class ImageEntry:
     def __init__(self, image: QImage):
@@ -53,7 +56,7 @@ class ImageCache:
     currentsize: int = 0
 
     def __init__(self):
-        self._cache: WeakKeyDictionary = WeakKeyDictionary()  # TODO - more specific type annotation - SP
+        self._cache: CacheDict = WeakKeyDictionary()
 
     def clear(self) -> None:
         """Remove all cached images."""
@@ -67,7 +70,7 @@ class ImageCache:
         except KeyError:
             pass
 
-    def tileset(self, key: Key):  # TODO - return type annotation - SP
+    def tileset(self, key: Key) -> Dict[Tile, ImageEntry]:
         """Return a dictionary with tile-entry pairs for the key.
 
         If no single tile is available, an empty dict is returned.

@@ -24,63 +24,73 @@
 PDF rendering backend using QtPdf.
 
 """
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Tuple, Optional, Iterator, Union, Type
 
 import platform
 
-from PySide6.QtCore import Qt, QByteArray, QCoreApplication, QModelIndex, QRect, QRectF, QSize, QUrl
-from PySide6.QtPdf import QPdfDocument, QPdfDocumentRenderOptions
+from PySide6.QtCore import Qt, QByteArray, QModelIndex, QRect, QRectF, QSize, QUrl
+from PySide6.QtPdf import QPdfDocument, QPdfDocumentRenderOptions, QPdfLinkModel
 
 # Check for PDF link support (added in Qt 6.6)
 # As of 2026, some Linux distros still ship older Qt versions without it.
 # We will attempt to run with point-and-click disabled on such systems.
-try:
-    from PySide6.QtPdf import QPdfLinkModel
-except ImportError:
-    QPdfLinkModel = None
-    import sys
-    print("qpageview: "
-        "PDF links are disabled because QPdfLinkModel is unavailable.",
-        file=sys.stderr)
+# try:
+#     from PySide6.QtPdf import QPdfLinkModel
+# except ImportError:
+#     QPdfLinkModel = None
+#     import sys
+#     print(
+#         "qpageview: "
+#         "PDF links are disabled because QPdfLinkModel is unavailable.",
+#         file=sys.stderr
+#     )
 
-from . import document
-from . import page
+from .document import SingleSourceDocument
+from .page import AbstractRenderedPage
 from . import link
 from . import locking
 from . import render
 
+if TYPE_CHECKING:
+    from .render import AbstractRenderer
+
+FilenameType = Union[str, QByteArray, QPdfDocument]
 
 class Link(link.Link):
     """A link that encapsulates QPdfLinkModel data."""
-    def __init__(self, linkobj, index, pointSize):
-        self._targetPage = linkobj.data(index, QPdfLinkModel.Role.Page.value)
-        self._url = linkobj.data(index,
-                                 QPdfLinkModel.Role.Url.value).toString()
+    def __init__(self, linkobj: QPdfLinkModel, index: QModelIndex, pointSize: QSize):
+        self._targetPage: int = linkobj.data(index, QPdfLinkModel.Role.Page.value)
+        self._url: str = linkobj.data(index, QPdfLinkModel.Role.Url.value).toString()
         # Convert to relative coordinates between 0.0 and 1.0 as expected
         # by link.Link, which uses them for compatibility with Poppler
         rect = linkobj.data(index, QPdfLinkModel.Role.Rectangle.value)
         x1, y1, x2, y2 = rect.normalized().getCoords()
-        self.area = (x1 / pointSize.width(), y1 / pointSize.height(),
-                     x2 / pointSize.width(), y2 / pointSize.height())
+        self.area: Tuple[int, int, int, int] = (
+            x1 / pointSize.width(), y1 / pointSize.height(),
+            x2 / pointSize.width(), y2 / pointSize.height()
+        )
 
     @property
-    def fileName(self):
+    def fileName(self) -> str:
         """The file name if this is an external link."""
         return QUrl(self.url).fileName() if self.isExternal else ""
 
     @property
-    def isExternal(self):
+    def isExternal(self) -> bool:
         """Indicates whether this is an external link."""
-        return (self.url and "://" in self.url)
+        return self.url and "://" in self.url  # type: ignore - this results in a bool - SP
 
     @property
-    def targetPage(self):
+    def targetPage(self) -> int:
         """If this is an internal link, the page number to which the
         link should jump; otherwise -1."""
         # QtPdf pages are 0-indexed, but our View is 1-indexed
         return -1 if self._targetPage == -1 else self._targetPage + 1
 
     @property
-    def url(self):
+    def url(self) -> str:
         """The URL the link points to."""
         url = self._url
         if platform.system() == "Windows":
@@ -88,8 +98,11 @@ class Link(link.Link):
             for proto in ("file", "textedit"):
                 scheme = "{0}://".format(proto)
                 pos = len(scheme) + 1  # the colon should be here
-                if (url.startswith(scheme)
-                    and url[pos - 1].isalpha() and not url[pos].isalpha()):
+                if (
+                    url.startswith(scheme)
+                    and url[pos - 1].isalpha()
+                    and not url[pos].isalpha()
+                ):
                     # Capitalize the drive letter because that is the standard
                     # format, and some path-matching functions (incorrectly)
                     # assume case sensitivity
@@ -102,7 +115,7 @@ class Link(link.Link):
         return url
 
 
-class PdfPage(page.AbstractRenderedPage):
+class PdfPage(AbstractRenderedPage):
     """A Page capable of displaying one page of a QPdfDocument instance.
 
     It has two additional instance attributes:
@@ -111,14 +124,26 @@ class PdfPage(page.AbstractRenderedPage):
         `pageNumber`: the page number to render
 
     """
-    def __init__(self, document, pageNumber, renderer=None):
+    _linksCache: link.Links
+
+    def __init__(
+        self,
+        document: QPdfDocument,
+        pageNumber: int,
+        renderer: Optional[AbstractRenderer] = None
+    ):
         super().__init__(renderer)
         self.document = document
         self.pageNumber = pageNumber
         self.setPageSize(document.pagePointSize(pageNumber))
 
     @classmethod
-    def loadDocument(cls, document, renderer=None, pageSlice=None):
+    def loadDocument(
+        cls,
+        document: QPdfDocument,
+        renderer: Optional[AbstractRenderer] = None,
+        pageSlice: Optional[slice] = None
+    ) -> Iterator[PdfPage]:
         """Convenience class method yielding instances of this class.
 
         The Page instances are created from the document, in page number order.
@@ -134,7 +159,11 @@ class PdfPage(page.AbstractRenderedPage):
             yield cls(document, num, renderer)
 
     @classmethod
-    def load(cls, filename, renderer=None):
+    def load(
+        cls,
+        filename: FilenameType,
+        renderer: Optional[AbstractRenderer] = None
+    ) -> Tuple[PdfPage, ...]:
         """Load a PDF document, and yield of instances of this class.
 
         The filename can also be a QByteArray or a QPdfDocument instance.
@@ -142,28 +171,29 @@ class PdfPage(page.AbstractRenderedPage):
 
         """
         doc = load(filename)
-        return cls.loadDocument(doc, renderer) if doc else ()
+        return tuple(cls.loadDocument(doc, renderer)) if doc else ()
 
-    def mutex(self):
+    def mutex(self) -> QPdfDocument:
         """No two pages of the same document are rendered at the same time."""
         return self.document
 
-    def group(self):
+    def group(self) -> QPdfDocument:
         """Reimplemented to return the document our page is displayed from."""
         return self.document
 
-    def ident(self):
+    def ident(self) -> int:
         """Reimplemented to return the page number of this page."""
         return self.pageNumber
 
-    def text(self, rect):
+    def text(self, rect: QRect) -> str:
         """Returns text inside rectangle."""
         rectf = self.mapFromPage(self.pageWidth, self.pageHeight).rect(rect)
         with locking.lock(self.document):
             return self.document.getSelection(
-                self.pageNumber, rectf.topLeft(), rectf.bottomRight()).text()
+                self.pageNumber, rectf.topLeft(), rectf.bottomRight()
+            ).text()
 
-    def links(self):
+    def links(self) -> link.Links:
         """Return links inside the document."""
         document, pageNumber = self.document, self.pageNumber
         try:
@@ -179,15 +209,16 @@ class PdfPage(page.AbstractRenderedPage):
                 links = []
                 for row in range(lm.rowCount(parentIndex)):
                     index = lm.index(row, 0, parentIndex)
-                    links.append(Link(lm, index,
-                                      document.pagePointSize(pageNumber)))
+                    links.append(
+                        Link(lm, index, document.pagePointSize(pageNumber))
+                    )
                 self._linksCache = link.Links(links)
             return self._linksCache
 
 
-class PdfDocument(document.SingleSourceDocument):
+class PdfDocument(SingleSourceDocument):
     """A lazily loaded PDF document."""
-    pageClass = PdfPage
+    pageClass: Type[PdfPage] = PdfPage
 
     def __init__(self, source=None, renderer=None):
         super().__init__(source, renderer)

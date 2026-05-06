@@ -37,7 +37,6 @@ from . import constants
 from . import util
 from .view import View
 
-
 class ImageViewMixin:
     """View Mixin with a few customisations for displaying a single page/image.
 
@@ -51,16 +50,16 @@ class ImageViewMixin:
     """
     fitNaturalSizeEnabled: bool = True
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self: ImageView, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setViewMode(constants.FitBoth)
         self.pageLayout().setMargins(QMargins(0, 0, 0, 0))
 
-    def setImage(self, image: QImage) -> None:
+    def setImage(self: ImageView, image: QImage) -> None:
         """Convenience method to display a QImage."""
         self.loadImages([image])
 
-    def toggleZooming(self) -> None:
+    def toggleZooming(self: ImageView) -> None:
         """Toggles between FitBoth and natural size."""
         if self.viewMode() == constants.FitBoth:
             self.setViewMode(constants.FixedScale)
@@ -68,7 +67,7 @@ class ImageViewMixin:
         else:
             self.setViewMode(constants.FitBoth)
 
-    def fitPageLayout(self) -> None:
+    def fitPageLayout(self: ImageView) -> None:
         """Reimplemented to avoid zooming-to-fit larger than naturalsize."""
         layout = self.pageLayout()
         if self.fitNaturalSizeEnabled and self.viewMode() and layout.count():
@@ -86,7 +85,7 @@ class ImageViewMixin:
         else:
             super().fitPageLayout()
 
-    def mouseReleaseEvent(self, ev: QMouseEvent) -> None:
+    def mouseReleaseEvent(self: ImageView, ev: QMouseEvent) -> None:
         """Reimplemented to toggle between FitBoth and ZoomNaturalSize."""
         if not self.isDragging() and ev.button() == Qt.MouseButton.LeftButton:
             self.toggleZooming()

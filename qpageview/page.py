@@ -25,13 +25,19 @@ A Page is responsible for drawing a page inside a PageLayout.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional, Callable, Union, Self, Any, Set, List
+from typing import (
+    TYPE_CHECKING, Optional, Callable, Union, Self, Any, Set, List,
+    Iterator, Iterable
+)
 
 from weakref import WeakKeyDictionary
 
-from PySide6.QtCore import QRectF, QSizeF, Qt, QIODevice, QPoint, QRect
+from PySide6.QtCore import (
+    QRectF, QSizeF, Qt, QIODevice, QPoint, QRect, QByteArray
+)
 from PySide6.QtGui import (
-    QImage, QPageSize, QPainter, QPdfWriter, QPixmap, QTransform, QPaintDevice, QColor
+    QImage, QPageSize, QPainter, QPdfWriter, QPixmap, QTransform,
+    QPaintDevice, QColor
 )
 from PySide6.QtSvg import QSvgGenerator
 
@@ -41,10 +47,12 @@ from .constants import Rotate_0, Rotation
 if TYPE_CHECKING:
     from .link import Links, Link
     from .render import AbstractRenderer
+    from .diff import DiffPage
 
 # a cache to store "owned" copies
 _copycache: WeakKeyDictionary[Any, WeakKeyDictionary["AbstractPage", "AbstractPage"]] = WeakKeyDictionary()
 
+Filename = Union[str, QByteArray]
 
 class AbstractPage(Rectangular):
     """A Page is a rectangle that is positioned in a PageLayout.
@@ -109,7 +117,11 @@ class AbstractPage(Rectangular):
     _links: Links = None
 
     @classmethod
-    def load(cls, filename, renderer=None):
+    def load(
+        cls,
+        filename: Filename,
+        renderer: Optional[AbstractRenderer] = None
+    ) -> Iterator[Self]:
         """Implement this to yield one or more pages by reading the file.
 
         The renderer may be None, and not all page types use a renderer.
@@ -120,13 +132,17 @@ class AbstractPage(Rectangular):
         pass
 
     @classmethod
-    def loadFiles(cls, filenames, renderer=None):
+    def loadFiles(
+        cls,
+        filenames: Iterable[Filename],
+        renderer: Optional[AbstractRenderer] = None
+    ) -> Iterator[Self]:
         """Load multiple files, yielding Page instances of this type."""
         for f in filenames:
             for page in cls.load(f, renderer):  # type: ignore - SP
                 yield page
 
-    def copy(self, owner: Optional[Any] = None, matrix: Optional[QTransform] = None) -> AbstractPage:
+    def copy(self, owner: Optional[Any] = None, matrix: Optional[QTransform] = None) -> Self:
         """Return a copy of the page with the same instance attributes.
 
         If owner is specified, the copy is weakly cached for that owner and
@@ -150,7 +166,7 @@ class AbstractPage(Rectangular):
         page.__dict__.update(self.__dict__)
         if matrix:
             page.setGeometry(matrix.mapRect(self.geometry()))
-        return page
+        return page  # type: ignore - this is ultimately Self, but the type checker doesn't know that - SP
 
     def setPageSize(self, sizef: QSizeF) -> None:
         """Set our natural page size (QSizeF).
@@ -182,7 +198,7 @@ class AbstractPage(Rectangular):
         self,
         width: Optional[float] = None,
         height: Optional[float] = None
-    ):
+    ) -> QTransform:
         """Return a QTransform, converting an original area to page coordinates.
 
         The `width` and `height` refer to the original (unrotated) width and
@@ -250,7 +266,7 @@ class AbstractPage(Rectangular):
     def paint(
         self,
         painter: QPainter,
-        rect: QRectF,
+        rect: QRect,
         callback: Callable[[AbstractPage], None] = None
     ) -> None:
         """Implement this to paint our Page.
@@ -391,7 +407,7 @@ class AbstractPage(Rectangular):
 
     def pixmap(
         self,
-        rect: Optional[QRectF] = None,
+        rect: Optional[QRect] = None,
         size: float = 100,
         paperColor: Optional[QColor] = None
     ) -> QPixmap:
@@ -410,7 +426,7 @@ class AbstractPage(Rectangular):
         dpi = size / l * self.dpi
         return QPixmap.fromImage(self.image(rect, dpi, dpi, paperColor))
 
-    def mutex(self) -> Optional[object]:
+    def mutex(self) -> Optional[Any]:
         """Return an object that should be locked when rendering the page.
 
         Page are guaranteed not to be rendered at the same time when they
@@ -419,7 +435,7 @@ class AbstractPage(Rectangular):
         """
         pass
 
-    def group(self) -> Self:
+    def group(self) -> Any:
         """Return the group the page belongs to.
 
         This could be some document structure, so that different Page objects
@@ -481,6 +497,7 @@ class AbstractPage(Rectangular):
         """
         return ""
 
+    # noinspection PyMethodMayBeStatic
     def getLinks(self) -> Links:
         """Implement this method to load our links."""
         from . import link
@@ -580,10 +597,10 @@ class AbstractRenderedPage(AbstractPage):
             rect = self.pageRect()
         else:
             rect = rect & self.pageRect()
-        from . import render
-        k = render.Key(self.group(), self.ident(), 0, self.pageWidth, self.pageHeight)
-        r: QRectF = rect.normalized().getRect()  # type: ignore - SP
-        t = render.Tile(r.x(), r.y(), r.width(), r.height())
+        from .render import Key, Tile
+        k = Key(self.group(), self.ident(), 0, int(self.pageWidth), int(self.pageHeight))
+        r: QRect = rect.normalized().getRect()  # type: ignore - SP
+        t = Tile(r.x(), r.y(), r.width(), r.height())
         self.renderer.draw(self, painter, k, t, paperColor)
 
     def image(
@@ -650,7 +667,7 @@ class BlankPage(AbstractPage):
         s = self.defaultSize()
         width = s.width() * dpiX / self.dpi
         height = s.height() * dpiY / self.dpi
-        image = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)  # type: ignore - float is fine as sub for int - SP
+        image = QImage(int(width), int(height), QImage.Format.Format_ARGB32_Premultiplied)
         image.fill(paperColor or Qt.GlobalColor.white)
         return image
 
@@ -659,12 +676,12 @@ class ImagePrintPageMixin:
     """A Page mixin that implements print() using the image() method.
 
     This can be used e.g. for compositing pages, which does not work well
-    when painting to a PDF, a printer or a SVG generator.
+    when painting to a PDF, a printer or an SVG generator.
 
     """
 
     def print(
-        self,
+        self: DiffPage,
         painter: QPainter,
         rect: QRectF = None,
         paperColor: Optional[QColor] = None

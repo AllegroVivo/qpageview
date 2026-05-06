@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from typing import (
     TYPE_CHECKING, Optional, List, Sequence, Type, Iterator, Any, Tuple,
-    Callable, Union
+    Callable, Union, Set
 )
 
 import collections
@@ -140,7 +140,7 @@ class MultiPage(AbstractRenderedPage):
             r.moveCenter(center)
             page.setGeometry(r)
 
-    def visiblePagesAt(self, rect: QRectF) -> Iterator[Tuple[AbstractPage, QRect]]:
+    def visiblePagesAt(self, rect: QRect) -> Iterator[Tuple[AbstractPage, QRect]]:
         """Yield (page, rect) for all subpages.
 
         The rect may be invalid when opaquePages is False. If opaquePages is
@@ -159,9 +159,7 @@ class MultiPage(AbstractRenderedPage):
                     continue    # skip if this part is hidden below the other
                 covered += overlayrect
                 yield p, overlayrect
-                if isinstance(rect, QRectF):
-                    rect = rect.toRect()  # QRegion takes a QRect
-                if not QRegion(rect).subtracted(covered):  # type: ignore - Will be a QRect by this point - SP
+                if not QRegion(rect).subtracted(covered):
                     break
 
     def printablePagesAt(self, rect: QRectF) -> Iterator[Tuple[AbstractPage, QTransform]]:
@@ -173,8 +171,8 @@ class MultiPage(AbstractRenderedPage):
         print() method.
 
         """
-        origmatrix = self.transform().inverted()[0] # map pos to original page
-        origmatrix.scale(self.scaleX, self.scaleY)  # undo the scaling done in printing.py
+        origmatrix = self.transform().inverted()[0]  # map pos to original page
+        origmatrix.scale(self.scaleX, self.scaleY)   # undo the scaling done in printing.py
         for p, r in self.visiblePagesAt(self.mapToPage().rect(rect)):
             center = origmatrix.map(QRectF(p.geometry()).center())
             m = QTransform()    # matrix from page to subpage
@@ -210,7 +208,7 @@ class MultiPage(AbstractRenderedPage):
             p.print(painter, clip)
             painter.restore()
 
-    def text(self, rect: QRectF) -> Optional[str]:
+    def text(self, rect: QRect) -> Optional[str]:
         """Reimplemented to get text from sub-pages."""
         for p, rect in self.visiblePagesAt(rect):
             if rect:
@@ -218,14 +216,14 @@ class MultiPage(AbstractRenderedPage):
                 if text:
                     return text
 
-    def _linkPages(self, rect: Optional[QRectF] = None) -> Iterator[Tuple[AbstractPage, QRect]]:
+    def _linkPages(self, rect: Optional[QRect] = None) -> Iterator[Tuple[AbstractPage, QRect]]:
         """Internal. Yield the pages allowed for links (and visible in rect if given)."""
         for p, rect in self.visiblePagesAt(rect or self.rect()):
             yield p, rect
             if self.linksOnlyFirstSubPage:
                 break
 
-    def linksAt(self, point):
+    def linksAt(self, point: QPoint) -> List[Link]:
         """Reimplemented to find links in sub-pages."""
         result = []
         for p, rect in self._linkPages():
@@ -233,14 +231,14 @@ class MultiPage(AbstractRenderedPage):
                 result.extend(p.linksAt(point - p.pos()))
         return result
 
-    def linksIn(self, rect: QRectF):  # TODO - typehint
+    def linksIn(self, rect: QRect) -> Set[Link]:
         """Reimplemented to find links in sub-pages."""
         result = set()
         for p, rect in self._linkPages(rect):
             result.update(p.linksIn(rect.translated(-p.pos())))
         return result
 
-    def linkRect(self, link: Link) -> Optional[QRectF]:
+    def linkRect(self, link: Link) -> QRectF:
         """Reimplemented to get correct area on the page the link belongs to."""
         for p, r in self._linkPages():
             if link in p.links():
@@ -263,8 +261,8 @@ class MultiPageRenderer(AbstractRenderer):
         self,
         page: MultiPage,
         device: QPaintDevice,
-        rect: QRectF,
-        callback: Optional[Callable] = None  # TODO - complete typehint
+        rect: QRect,
+        callback: Optional[Callable[[AbstractPage], None]] = None
     ) -> bool:
         """Reimplemented to check/rerender (if needed) all sub-pages."""
         # make the call back return with the original page, not the overlay page
@@ -275,17 +273,17 @@ class MultiPageRenderer(AbstractRenderer):
             if (
                 overlayrect
                 and p.renderer
-                and not p.renderer.update(p, device, overlayrect.translated(-p.pos()).toRectF(), newcallback)
+                and not p.renderer.update(p, device, overlayrect.translated(-p.pos()), newcallback)
             ):
                 ok = False
         return ok
 
     def paint(
         self,
-        page: AbstractPage,
+        page: MultiPage,
         painter: QPainter,
-        rect: QRectF,
-        callback: Optional[Callable] = None  # TODO - complete typehint
+        rect: QRect,
+        callback: Optional[Callable[[AbstractPage], None]] = None
     ) -> None:
         """Reimplemented to paint all the sub-pages on top of each other."""
         # make the call back return with the original page, not the overlay page
@@ -324,7 +322,7 @@ class MultiPageRenderer(AbstractRenderer):
     def image(
         self,
         page: MultiPage,
-        rect: QRectF,
+        rect: QRect,
         dpiX: float,
         dpiY: float,
         paperColor: QColor
@@ -349,7 +347,6 @@ class MultiPageRenderer(AbstractRenderer):
             else:
                 overlayscale = overlaywidth / p.width
             scale = ourscale / overlayscale
-            # TODO - Handle this QRect/QRectF typing mismatch
             img = p.image(overlayrect.translated(-p.pos()), dpiX * scale, dpiY * scale, paperColor)
             pos = overlayrect.topLeft() - rect.topLeft()
             pos = QPoint(round(pos.x() * hscale), round(pos.y() * vscale))
@@ -363,14 +360,14 @@ class MultiPageRenderer(AbstractRenderer):
     def unschedule(
         self,
         pages: Sequence[MultiPage],
-        callback: Callable  # TODO - complete typehint - SP
+        callback: Callable[[AbstractPage], None]
     ) -> None:
         """Reimplemented to unschedule all sub-pages."""
         for page in pages:
             newcallback = CallBack(callback, page) if callback else None
             for p in page.pages:
                 if p.renderer:
-                    p.renderer.unschedule((p,), newcallback)
+                    p.renderer.unschedule((p,), newcallback)  # type: ignore - SP
 
     def invalidate(self, pages: Sequence[MultiPage]) -> None:
         """Reimplemented to invalidate the base and overlay pages."""
@@ -382,7 +379,11 @@ class MultiPageRenderer(AbstractRenderer):
         for renderer, pages in renderers.items():
             renderer.invalidate(pages)
 
-    def combine(self, painter: QPainter, images: Tuple[QPoint, QPixmap]) -> None:
+    def combine(
+        self,
+        painter: QPainter,
+        images: Sequence[Tuple[QPoint, Union[QImage, QPixmap]]]
+    ) -> None:
         """Paints images on the painter.
 
         Each image is a tuple(QPoint, QPixmap), describing where to draw.
@@ -403,7 +404,7 @@ class CallBack:
 
     def __new__(
         cls,
-        origcallable: Callable,  # TODO - complete typehint - SP
+        origcallable: Callable[[AbstractPage], None],
         page: AbstractPage
     ) -> Union[CallBack, Callable]:
         # if the callable is already a CallBack instance, just return it. This

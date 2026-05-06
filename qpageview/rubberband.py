@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Union, Literal, Optional, Iterator, Tuple, Set
 
 from PySide6.QtCore import QEvent, QRect, QSize, Qt, Signal, QPoint
 from PySide6.QtGui import QContextMenuEvent, QCursor, QPainter, QPalette, QPen, QRegion, QPaintEvent, QColor, QImage, QMouseEvent
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QWidget, QAbstractScrollArea
 
 if TYPE_CHECKING:
     from .page import AbstractPage
@@ -362,7 +362,7 @@ class Rubberband(QWidget):
             self.setGeometry(geom)
             self._setSelectionFromGeometry(geom)
 
-    def eventFilter(self, viewport, ev: QMouseEvent) -> bool:
+    def eventFilter(self, viewport: QAbstractScrollArea, ev: QMouseEvent) -> bool:
         """Act on events in the viewport:
 
         * keep on the same place when the viewport resizes
@@ -403,12 +403,14 @@ class Rubberband(QWidget):
             elif ev.type() == QEvent.Type.MouseButtonRelease and ev.button() == self._dragbutton:
                 self.stopDrag()
                 if ev.button() == Qt.MouseButton.RightButton:
-                    QApplication.postEvent(viewport,
-                        QContextMenuEvent(QContextMenuEvent.Reason.Mouse, ev.pos()))
+                    QApplication.postEvent(
+                        viewport,
+                        QContextMenuEvent(QContextMenuEvent.Reason.Mouse, ev.pos())
+                    )
                 return True
         return False
 
-    def mousePressEvent(self, ev):
+    def mousePressEvent(self, ev: QMouseEvent) -> None:
         """Can start a new drag when we are clicked ourselves."""
         pos = self.mapToParent(ev.pos())
         if not self._dragging:
@@ -418,7 +420,7 @@ class Rubberband(QWidget):
                 if self.showbutton != Qt.MouseButton.RightButton or self.edge(pos) != _INSIDE:
                     self.startDrag(pos, ev.button())
 
-    def mouseMoveEvent(self, ev):
+    def mouseMoveEvent(self, ev: QMouseEvent) -> None:
         """Move if we are dragging; show the correct cursor shape on the edges."""
         pos = self.mapToParent(ev.pos())
         if self._dragging:
@@ -427,12 +429,12 @@ class Rubberband(QWidget):
             edge = self.edge(pos)
             self.adjustCursor(edge)
 
-    def mouseReleaseEvent(self, ev):
+    def mouseReleaseEvent(self, ev: QMouseEvent) -> None:
         """End a self-initiated drag; if the right button was used; send a context menu event."""
         if self._dragging and ev.button() == self._dragbutton:
             self.stopDrag()
         if ev.button() == Qt.MouseButton.RightButton:
-            QApplication.postEvent(self.parent(),
-                QContextMenuEvent(QContextMenuEvent.Reason.Mouse, ev.pos() + self.pos()))
-
-
+            QApplication.postEvent(
+                self.parent(),  # type: ignore - SP
+                QContextMenuEvent(QContextMenuEvent.Reason.Mouse, ev.pos() + self.pos())
+            )

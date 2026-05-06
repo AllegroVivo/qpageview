@@ -225,7 +225,7 @@ class LinkViewMixin:
         if self.linksEnabled and ev.type() in (QEvent.Type.ToolTip, QEvent.Type.WhatsThis):
             page, link = self.linkAt(ev.pos())
             if link:
-                self.linkHelpEvent(ev, page, link)
+                self.linkHelpEvent(ev, page, link)  # type: ignore - page is valid if link is valid - SP
                 return True
         return super().event(ev)
 
@@ -234,7 +234,7 @@ class LinkViewMixin:
         if self.linksEnabled:
             page, link = self.linkAt(ev.pos())
             if link:
-                self.linkClickEvent(ev, page, link)
+                self.linkClickEvent(ev, page, link)  # type: ignore - page is valid if link is valid - SP
                 return
         super().mousePressEvent(ev)
 

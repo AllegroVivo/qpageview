@@ -228,7 +228,7 @@ class AbstractRenderer:
         rect: QRectF,
         dpiX: float,
         dpiY: float,
-        paperColor: QColor
+        paperColor: Optional[QColor]
     ) -> QImage:
         """Returns a QImage of the specified rectangle on the Page.
 
@@ -308,7 +308,7 @@ class AbstractRenderer:
         """
         pass
 
-    def info(self, page: AbstractPage, device: QPaintDevice, rect: QRectF) -> RenderInfo:
+    def info(self, page: AbstractPage, device: QPaintDevice, rect: QRect) -> RenderInfo:
         """Return a namedtuple RenderInfo(images, missing, key, target, ratio).
 
         images is a list of tuples (tile, image) that are available in the
@@ -349,7 +349,7 @@ class AbstractRenderer:
         self,
         page: AbstractPage,
         device: QPaintDevice,
-        rect: QRectF,
+        rect: QRect,
         callback: Optional[RendererCallback] = None
     ) -> bool:
         """Check if a page can be painted on the device without waiting.

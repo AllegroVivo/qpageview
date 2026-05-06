@@ -37,7 +37,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 
 if TYPE_CHECKING:
     from .page import AbstractPage
-
+    from . import View
 
 class Highlighter:
     """A Highlighter can draw rectangles to highlight e.g. links in a View.
@@ -107,7 +107,8 @@ class HighlightViewMixin:
         """Set a Highlighter to use as the default highlighter."""
         self._defaultHighlighter = highlighter
 
-    def highlightRect(self, areas: Dict[AbstractPage, List[QRectF]]) -> QRectF:
+    # noinspection PyMethodMayBeStatic
+    def highlightRect(self, areas: Dict[AbstractPage, List[QRectF]]) -> QRect:
         """Return the bounding rect of the areas."""
         boundingRect = QRect()
         for page, rects in areas.items():
@@ -119,7 +120,7 @@ class HighlightViewMixin:
         return boundingRect
 
     def highlight(
-        self,
+        self: View,
         areas: Dict[AbstractPage, List[QRectF]],
         highlighter: Optional[Highlighter] = None,
         msec: int = 0,
@@ -168,7 +169,7 @@ class HighlightViewMixin:
         self._highlights[highlighter] = (d, t)
         self.viewport().update()
 
-    def clearHighlight(self, highlighter: Optional[Highlighter] = None) -> None:
+    def clearHighlight(self: View, highlighter: Optional[Highlighter] = None) -> None:
         """Removes the highlighted areas of the given or default highlighter."""
         if highlighter is None:
             highlighter = self.defaultHighlighter()
@@ -207,7 +208,7 @@ class HighlightViewMixin:
         if areas:
             self.highlight(areas, highlighter, msec, scroll, margins, allowKinetic)
 
-    def getUrlHighlightAreas(self, urls: Sequence[str]) -> Optional[Dict[AbstractPage, List[QRectF]]]:
+    def getUrlHighlightAreas(self: View, urls: Sequence[str]) -> Optional[Dict[AbstractPage, List[QRectF]]]:
         """Return the areas to highlight all occurrences of the specified URLs.
 
         The areas are found in the dictionary returned by document().urls().
@@ -233,7 +234,7 @@ class HighlightViewMixin:
                             areas[pages[n]].extend(rects)
                 return areas
 
-    def paintEvent(self, ev: QPaintEvent) -> None:
+    def paintEvent(self: View, ev: QPaintEvent) -> None:
         """Paint the highlighted areas in the viewport."""
         super().paintEvent(ev)  # first paint the contents
         painter = QPainter(self.viewport())

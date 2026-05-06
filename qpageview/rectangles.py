@@ -25,7 +25,7 @@ Manages lists of rectangular objects and quickly finds them.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Sequence, Any, Optional, Tuple, Dict, List, TypeVar, Callable, Literal, Union, Set, Iterator, cast
+from typing import TYPE_CHECKING, Sequence, Any, Optional, Tuple, Dict, List, TypeVar, Callable, Literal, Union, Set, Iterator, cast, Iterable
 
 import bisect
 import operator
@@ -92,7 +92,7 @@ class Rectangles:
             indices.insert(i, coords[side])
             objects.insert(i, obj)
 
-    def bulk_add(self, objects: Sequence[TObject]) -> None:
+    def bulk_add(self, objects: Iterable[TObject]) -> None:
         """Adds many new items to the index using the function given in the constructor.
 
         After this, the index is cleared and recreated on the first search operation.

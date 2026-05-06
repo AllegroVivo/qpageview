@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import itertools
 import math
-from typing import TYPE_CHECKING, Tuple, Optional, Set, Iterator, List
+from typing import TYPE_CHECKING, Tuple, Optional, Iterator, List
 
 from PySide6.QtCore import QMargins, QPoint, QRect, Qt, QSize
 
@@ -155,7 +155,7 @@ class PageLayout(Rectangular, list):
         r = self._rects = PageRects(self.displayPages())
         return r
 
-    def pageAt(self, point: QPoint) -> Optional[Set[AbstractPage]]:
+    def pageAt(self, point: QPoint) -> Optional[AbstractPage]:
         """Return the page that contains the given QPoint.
 
         If the point is not on any page, None is returned.
@@ -170,7 +170,7 @@ class PageLayout(Rectangular, list):
         The pages are in undefined order.
 
         """
-        for page in self._pageRects().intersecting(*rect.getCoords()):
+        for page in self._pageRects().intersecting(*rect.getCoords()):  # type: ignore - getCoords() returns a 4-tuple, which we unpack - SP
             yield page
 
     def nearestPageAt(self, point: QPoint) -> Optional[AbstractPage]:
@@ -374,7 +374,7 @@ class LayoutEngine:
 
         ncols is the number of columns the layout will contain, nrows the
         number of rows; and prepend if the number of empty positions that the
-        layout wants, when the first row has less pages.
+        layout wants, when the first row has fewer pages.
 
         """
         if layout.orientation == Vertical:
@@ -392,7 +392,7 @@ class LayoutEngine:
         """Yield the layout's pages in a grid: (page, (x, y)).
 
         If prepend > 0, that number of first grid positions will remain unused.
-        This can be used for layouts that have less pages in the first row.
+        This can be used for layouts that have fewer pages in the first row.
 
         """
         if (self.orientation or layout.orientation) == Vertical:
@@ -487,8 +487,8 @@ class LayoutEngine:
 
         Every count is the number of page sets of that length. When the layout
         is in non-continuous mode, it displays only a single page set at a time.
-        For most layout engines, a page set is just one Page, but for column-
-        based layouts other values make sense.
+        For most layout engines, a page set is just one Page, but for
+        column-based layouts other values make sense.
 
         """
         return [(count, 1)] if count else []
@@ -503,7 +503,7 @@ class RowLayoutEngine(LayoutEngine):
         `pagesFirstRow`   = 1, the number of pages to display in the first row
         `fitAllColumns`   = True, whether "fit width" uses all columns
 
-    In non-continuous mode, this layout engine displayes a row of pages
+    In non-continuous mode, this layout engine displays a row of pages
     together. The `orientation` layout attribute is ignored in this layout
     engine.
 
@@ -541,7 +541,7 @@ class RowLayoutEngine(LayoutEngine):
 
         Takes into account the pagesPerRow and pagesFirstRow instance
         variables. If desired, prepends empty positions so the first row
-        contains less pages than the column width.
+        contains fewer pages than the column width.
 
         """
         ncols = self.pagesPerRow

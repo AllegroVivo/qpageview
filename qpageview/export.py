@@ -29,10 +29,12 @@ from typing import TYPE_CHECKING, TypeVar, Union, Optional, Sequence
 import os
 
 from PySide6.QtCore import (
-    QBuffer, QMimeData, QPoint, QSizeF, Qt, QUrl, QRectF, QByteArray, QObject
+    QBuffer, QMimeData, QPoint, QSizeF, Qt, QUrl, QByteArray,
+    QObject, QRect
 )
 from PySide6.QtGui import (
-    QDrag, QGuiApplication, QImage, QPageSize, QPdfWriter, QColor, QPixmap
+    QDrag, QGuiApplication, QImage, QPageSize, QPdfWriter, QColor,
+    QPixmap
 )
 
 from . import util
@@ -74,10 +76,10 @@ class AbstractExporter:
     """
     # Typehints
     _page: AbstractPage
-    _rect: QRectF
+    _rect: QRect
     _result: Optional[Union[QByteArray, bytes]]
     _tempFile: Optional[str]
-    _autoCropRect: Optional[QRectF]
+    _autoCropRect: Optional[QRect]
     _document: Optional[AbstractSourceDocument]
     _pixmap: Optional[QPixmap]
 
@@ -103,14 +105,14 @@ class AbstractExporter:
     defaultBasename: str = "document"
     defaultExt: str = ""
 
-    def __init__(self, page: TPage, rect=None):
+    def __init__(self, page: TPage, rect: Optional[QRect] = None):
         self.setPage(page, rect)
 
-    def setPage(self, page: TPage, rect=None):
+    def setPage(self, page: TPage, rect: Optional[QRect] = None):
         self._page = page.copy()
         if self._page.renderer:
             self._page.renderer = page.renderer.copy()
-        self._rect = rect
+        self._rect = rect  # type: ignore - SP
         self._result = None   # where the exported object is stored
         self._tempFile = None
         self._autoCropRect = None
@@ -127,7 +129,7 @@ class AbstractExporter:
             p.renderer.antialiasing = self.antialiasing
         return p
 
-    def autoCroppedRect(self) -> QRectF:
+    def autoCroppedRect(self) -> QRect:
         """Return the rect, auto-cropped if desired."""
         if not self.autocrop:
             return self._rect
@@ -140,7 +142,7 @@ class AbstractExporter:
             # add one pixel to prevent loosing small joins or curves etc
             rect = image.rect() & rect.adjusted(-1, -1, 1, 1)
             if self._rect is not None:
-                rect.translate(self._rect.topLeft())  # TODO - this is expecting a QPoint, but getting QPointF? - SP
+                rect.translate(self._rect.topLeft())
             self._autoCropRect = rect
         assert self._autoCropRect  # for type checker - SP
         return self._autoCropRect
@@ -180,6 +182,7 @@ class AbstractExporter:
         """Create and return a one-page Document to display the image to export."""
         pass
 
+    # noinspection PyMethodMayBeStatic
     def renderer(self) -> Optional[AbstractRenderer]:
         """Return a renderer for the document(). By default, None is returned."""
         return None
@@ -239,7 +242,7 @@ class AbstractExporter:
         """Save the exported image to a temp file and copy its name to the clipboard."""
         QGuiApplication.clipboard().setMimeData(self.tempFileMimeData())
 
-    def pixmap(self, size=100) -> QPixmap:
+    def pixmap(self, size: int = 100) -> QPixmap:
         """Return a small pixmap to use for dragging etc."""
         if self._pixmap is None:
             paperColor = self.paperColor if self.supportsPaperColor else None
@@ -267,9 +270,9 @@ class AbstractExporter:
 
 class ImageExporter(AbstractExporter):
     """Export a rectangular area of a Page (or the whole page) to an image."""
-    wantsVector = False
-    defaultBasename = "image"
-    defaultExt = ".png"
+    wantsVector: bool = False
+    defaultBasename: str = "image"
+    defaultExt: str = ".png"
 
     def export(self) -> QImage:
         """Create the QImage representing the exported image."""
@@ -289,7 +292,7 @@ class ImageExporter(AbstractExporter):
         return i
 
     def image(self) -> QImage:
-        return self.data()  # TODO - this works because export() returns a QImage, and data() caches the result of export() - SP
+        return self.data()  # type: ignore - this works because export() returns a QImage, and data() caches the result of export() - SP
 
     def createDocument(self) -> ImageDocument:
         from . import image
@@ -389,7 +392,7 @@ def pdf(
             pdf.newPage()
         layout = pdf.pageLayout()
         layout.setMode(layout.Mode.FullPageMode)
-        layout.setPageSize(QPageSize(targetSize * 72.0 / page.dpi, QPageSize.Unit.Point))  # TODO - this is expecting a QSize, but getting QSizeF? - SP
+        layout.setPageSize(QPageSize(targetSize * 72.0 / page.dpi, QPageSize.Unit.Point))  # type: ignore[call-overload] - type checker is picking the wrong overload - SP
         pdf.setPageLayout(layout)
         # TODO handle errors?
         page.output(pdf, source, paperColor)
