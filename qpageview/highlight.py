@@ -23,13 +23,20 @@
 """
 Highlight rectangular areas inside a View.
 """
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, List, Dict
 
 import collections
-import weakref
+from weakref import WeakKeyDictionary, ref
+from typing import Optional, Sequence, Tuple
 
-from PyQt6.QtCore import QRect, QRectF, QTimer
-from PyQt6.QtGui import QPainter, QPen
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtCore import QRect, QRectF, QTimer, QMargins
+from PySide6.QtGui import QPainter, QPen, QColor, QPaintEvent
+from PySide6.QtWidgets import QApplication, QWidget
+
+if TYPE_CHECKING:
+    from .page import AbstractPage
 
 
 class Highlighter:
@@ -52,11 +59,11 @@ class Highlighter:
 
     """
 
-    lineWidth = 2
-    radius = 3
-    color = None
+    lineWidth: int = 2
+    radius: int = 3
+    color: Optional[QColor] = None
 
-    def paintRects(self, painter, rects):
+    def paintRects(self, painter: QPainter, rects: Sequence[QRectF]):
         """Override this method to implement different drawing behaviour."""
         color = self.color if self.color is not None else QApplication.palette().highlight().color()
         pen = QPen(color)
@@ -84,22 +91,23 @@ class HighlightViewMixin:
     of Highlighter.
 
     """
-    def __init__(self, parent=None, **kwds):
-        self._highlights = weakref.WeakKeyDictionary()
-        self._defaultHighlighter = None
-        super().__init__(parent, **kwds)
+    def __init__(self, parent: Optional[QWidget] = None, **kwargs: Any):
+        self._highlights: WeakKeyDictionary[Highlighter, Tuple[WeakKeyDictionary[AbstractPage, List[QRectF]], Optional[QTimer]]] = WeakKeyDictionary()
+        self._defaultHighlighter: Optional[Highlighter] = None
+        super().__init__(parent, **kwargs)
 
-    def defaultHighlighter(self):
+    def defaultHighlighter(self) -> Highlighter:
         """Return a default highlighter, creating it if necessary."""
         if self._defaultHighlighter is None:
             self._defaultHighlighter = Highlighter()
+        assert self._defaultHighlighter is not None  # for type checker - SP
         return self._defaultHighlighter
 
-    def setDefaultHighlighter(self, highlighter):
+    def setDefaultHighlighter(self, highlighter: Highlighter) -> None:
         """Set a Highlighter to use as the default highlighter."""
         self._defaultHighlighter = highlighter
 
-    def highlightRect(self, areas):
+    def highlightRect(self, areas: Dict[AbstractPage, List[QRectF]]) -> QRectF:
         """Return the bounding rect of the areas."""
         boundingRect = QRect()
         for page, rects in areas.items():
@@ -110,7 +118,15 @@ class HighlightViewMixin:
             boundingRect |= pbound.translated(page.pos())
         return boundingRect
 
-    def highlight(self, areas, highlighter=None, msec=0, scroll=False, margins=None, allowKinetic=True):
+    def highlight(
+        self,
+        areas: Dict[AbstractPage, List[QRectF]],
+        highlighter: Optional[Highlighter] = None,
+        msec: int = 0,
+        scroll: bool = False,
+        margins: Optional[QMargins] = None,
+        allowKinetic: bool = True
+    ) -> None:
         """Highlight the areas dict using the given or default highlighter.
 
         The areas dict maps Page objects to lists of rectangles, where the
@@ -135,14 +151,16 @@ class HighlightViewMixin:
             if msec:
                 msec += self.remainingScrollTime()
 
-        d = weakref.WeakKeyDictionary(areas)
+        d = WeakKeyDictionary(areas)
         if msec:
-            selfref = weakref.ref(self)
+            selfref = ref(self)
             def clear():
+                # noinspection PyMethodFirstArgAssignment
                 self = selfref()
                 if self:
                     self.clearHighlight(highlighter)
-            t = QTimer(singleShot = True, timeout = clear)
+            t = QTimer(singleShot=True)
+            t.timeout.connect(clear)
             t.start(msec)
         else:
             t = None
@@ -150,10 +168,11 @@ class HighlightViewMixin:
         self._highlights[highlighter] = (d, t)
         self.viewport().update()
 
-    def clearHighlight(self, highlighter=None):
+    def clearHighlight(self, highlighter: Optional[Highlighter] = None) -> None:
         """Removes the highlighted areas of the given or default highlighter."""
         if highlighter is None:
             highlighter = self.defaultHighlighter()
+        assert highlighter is not None  # for type checker - SP
         try:
             (d, t) = self._highlights[highlighter]
         except KeyError:
@@ -162,13 +181,21 @@ class HighlightViewMixin:
         del self._highlights[highlighter]
         self.viewport().update()
 
-    def isHighlighting(self, highlighter=None):
+    def isHighlighting(self, highlighter: Optional[Highlighter] = None) -> bool:
         """Return True if the given or default highlighter is active."""
         if highlighter is None:
             highlighter = self.defaultHighlighter()
         return highlighter in self._highlights
 
-    def highlightUrls(self, urls, highlighter=None, msec=0, scroll=False, margins=None, allowKinetic=True):
+    def highlightUrls(
+        self,
+        urls: Sequence[str],
+        highlighter: Optional[Highlighter] = None,
+        msec: int = 0,
+        scroll: bool = False,
+        margins: Optional[QMargins] = None,
+        allowKinetic: bool = True
+    ) -> None:
         """Convenience method highlighting the specified urls in the Document.
 
         The urls argument is a list of urls (str); the other arguments
@@ -180,7 +207,7 @@ class HighlightViewMixin:
         if areas:
             self.highlight(areas, highlighter, msec, scroll, margins, allowKinetic)
 
-    def getUrlHighlightAreas(self, urls):
+    def getUrlHighlightAreas(self, urls: Sequence[str]) -> Optional[Dict[AbstractPage, List[QRectF]]]:
         """Return the areas to highlight all occurrences of the specified URLs.
 
         The areas are found in the dictionary returned by document().urls().
@@ -206,7 +233,7 @@ class HighlightViewMixin:
                             areas[pages[n]].extend(rects)
                 return areas
 
-    def paintEvent(self, ev):
+    def paintEvent(self, ev: QPaintEvent) -> None:
         """Paint the highlighted areas in the viewport."""
         super().paintEvent(ev)  # first paint the contents
         painter = QPainter(self.viewport())
@@ -220,5 +247,3 @@ class HighlightViewMixin:
                 f = page.mapToPage(1, 1).rect
                 rects = [f(area) for area in areas if area & rectarea]
                 highlighter.paintRects(painter, rects)
-
-

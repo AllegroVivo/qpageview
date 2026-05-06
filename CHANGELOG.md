@@ -7,6 +7,22 @@ defined at the bottom of this file.
 
 All notable changes to the qpageview project are documented in this file.
 
+## [2.0.0] - Unreleased
+
+### Added
+
+* Add type annotations to the codebase.
+
+### Changed
+
+* Migrate from PyQt6 to PySide6, which is now the default Qt binding for Python and has improved typehints for improved developer experience.
+
+### Fixed
+
+### To-Dos
+
+* Convert string formats in the codebase to f-strings for improved readability and performance.
+
 ## [1.0.4] - 2026-04-04
 
 ### Fixed

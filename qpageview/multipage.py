@@ -27,52 +27,69 @@ The MultiPageRenderer has the same interface as an ordinary renderer, but defers
 rendering to the renderer of the embedded pages.
 
 """
+from __future__ import annotations
+
+from typing import (
+    TYPE_CHECKING, Optional, List, Sequence, Type, Iterator, Any, Tuple,
+    Callable, Union
+)
 
 import collections
 import itertools
 
-from PyQt6.QtCore import QPoint, QRect, QRectF, Qt
-from PyQt6.QtGui import QColor, QImage, QPainter, QPixmap, QRegion, QTransform
+from PySide6.QtCore import QPoint, QRect, QRectF, Qt
+from PySide6.QtGui import (
+    QImage, QPainter, QPixmap, QRegion, QTransform, QColor, QPaintDevice
+)
 
-from . import document
-from . import page
-from . import render
+from .document import MultiSourceDocument
+from .page import AbstractRenderedPage, BlankPage
+from .render import AbstractRenderer
+
+if TYPE_CHECKING:
+    from .page import AbstractPage
+    from .link import Link
 
 
+class MultiPage(AbstractRenderedPage):
+    """A special Page that has a list of embedded sub-pages.
 
-class MultiPage(page.AbstractRenderedPage):
-    """A special Page that has a list of embedded sub pages.
-
-    The sub pages are in the pages attribute, the first one is on top.
+    The sub-pages are in the pages attribute, the first one is on top.
 
     The position and size of the embedded pages is set in the updateSize()
-    method, which is inherited from AbstractPage. By default all sub pages
+    method, which is inherited from AbstractPage. By default, all sub-pages
     are centered in their natural size.
 
-    Rotation of sub pages is relative to the MultiPage.
+    Rotation of sub-pages is relative to the MultiPage.
 
     The `scalePages` instance attribute can be used to multiply the zoomfactor
-    for the sub pages.
+    for the sub-pages.
 
     The `opaquePages` instance attribute optimizes some procedures when set to
-    True (i.e. it prevents rendering sub pages that are hidden below others).
+    True (i.e. it prevents rendering sub-pages that are hidden below others).
 
-    By default, only links in the first sub page are handled.
-    Set `linksOnlyFirstSubPage` to False if you want links in all sub pages.
+    By default, only links in the first sub-page are handled.
+    Set `linksOnlyFirstSubPage` to False if you want links in all sub-pages.
 
     """
 
-    scalePages = 1.0
-    opaquePages = True
-    linksOnlyFirstSubPage = True
+    scalePages: float = 1.0
+    opaquePages: bool = True
+    linksOnlyFirstSubPage: bool = True
 
-    def __init__(self, renderer=None):
-        self.pages = []
+    # noinspection PyMissingConstructor
+    def __init__(self, renderer: Optional[AbstractRenderer] = None):
+        self.pages: List[AbstractPage] = []
         if renderer is not None:
             self.renderer = renderer
 
     @classmethod
-    def createPages(cls, pageLists, renderer=None, pad=page.BlankPage):
+    def createPages(
+        cls,
+        pageLists: Sequence[List[AbstractPage]],
+        renderer: Optional[AbstractRenderer] = None,
+        pad: Type[BlankPage] = BlankPage
+    ) -> Iterator[MultiPage]:
         """Yield pages, taking each page from every pageList.
 
         If pad is given and is not None, it is a callable that instantiates
@@ -88,29 +105,29 @@ class MultiPage(page.AbstractRenderedPage):
             page.pages[:] = (p if p else pad() for p in pages)
             yield page
 
-    def copy(self, owner=None, matrix=None):
-        """Reimplemented to also copy the sub pages."""
+    def copy(self, owner: Optional[Any] = None, matrix: Optional[QTransform] = None) -> MultiPage:
+        """Reimplemented to also copy the sub-pages."""
         page = super().copy(owner, matrix)
         page.pages = [p.copy(owner, matrix) for p in self.pages]
-        return page
+        return page  # type: ignore - super().copy() returns the current page type - SP
 
-    def updateSize(self, dpiX, dpiY, zoomFactor):
+    def updateSize(self, dpiX: float, dpiY: float, zoomFactor: float) -> None:
         """Reimplemented to also position our sub-pages.
 
-        The default implementation of this method zooms the sub pages
+        The default implementation of this method zooms the sub-pages
         at the zoom level of the page * self.scalePages.
 
         """
         super().updateSize(dpiX, dpiY, zoomFactor)
 
-        # zoom the sub pages, using the same zoomFactor
+        # zoom the sub-pages, using the same zoomFactor
         for page in self.pages:
             page.computedRotation = (page.rotation + self.computedRotation) & 3
             page.updateSize(dpiX, dpiY, zoomFactor * self.scalePages)
 
         self.updatePagePositions()
 
-    def updatePagePositions(self):
+    def updatePagePositions(self) -> None:
         """Called by updateSize(), set the page positions.
 
         The default implementation of this method centers the pages.
@@ -123,11 +140,11 @@ class MultiPage(page.AbstractRenderedPage):
             r.moveCenter(center)
             page.setGeometry(r)
 
-    def visiblePagesAt(self, rect):
+    def visiblePagesAt(self, rect: QRectF) -> Iterator[Tuple[AbstractPage, QRect]]:
         """Yield (page, rect) for all subpages.
 
         The rect may be invalid when opaquePages is False. If opaquePages is
-        True, pages outside rect or hidden below others are exclued. The
+        True, pages outside rect or hidden below others are excluded. The
         yielded rect is always valid in that case.
 
         """
@@ -142,15 +159,17 @@ class MultiPage(page.AbstractRenderedPage):
                     continue    # skip if this part is hidden below the other
                 covered += overlayrect
                 yield p, overlayrect
-                if not QRegion(rect).subtracted(covered):
+                if isinstance(rect, QRectF):
+                    rect = rect.toRect()  # QRegion takes a QRect
+                if not QRegion(rect).subtracted(covered):  # type: ignore - Will be a QRect by this point - SP
                     break
 
-    def printablePagesAt(self, rect):
+    def printablePagesAt(self, rect: QRectF) -> Iterator[Tuple[AbstractPage, QTransform]]:
         """Yield (page, matrix) for all subpages that are visible in rect.
 
         If opaquePages is True, excludes pages outside rect or hidden below
         others. The matrix (QTransform) describes the transformation from the
-        page to the sub page. Rect is in original coordinates, as with the
+        page to the sub-page. Rect is in original coordinates, as with the
         print() method.
 
         """
@@ -160,15 +179,20 @@ class MultiPage(page.AbstractRenderedPage):
             center = origmatrix.map(QRectF(p.geometry()).center())
             m = QTransform()    # matrix from page to subpage
             m.translate(center.x(), center.y())
-            m.rotate(p.rotation * 90) # rotation relative to us
+            m.rotate(p.rotation * 90)  # rotation relative to us
             m.scale(
                 self.scalePages * p.scaleX * self.dpi / p.dpi,
                 self.scalePages * p.scaleY * self.dpi / p.dpi)
             m.translate(p.pageWidth / -2, p.pageHeight / -2)
             yield p, m
 
-    def print(self, painter, rect=None, paperColor=None):
-        """Prints our sub pages."""
+    def print(
+        self,
+        painter: QPainter,
+        rect: Optional[QRectF] = None,
+        paperColor: Optional[QColor] = None
+    ) -> None:
+        """Prints our sub-pages."""
         if rect is None:
             rect = self.pageRect()
         else:
@@ -186,15 +210,15 @@ class MultiPage(page.AbstractRenderedPage):
             p.print(painter, clip)
             painter.restore()
 
-    def text(self, rect):
-        """Reimplemented to get text from sub pages."""
+    def text(self, rect: QRectF) -> Optional[str]:
+        """Reimplemented to get text from sub-pages."""
         for p, rect in self.visiblePagesAt(rect):
             if rect:
                 text = p.text(rect.translated(-p.pos()))
                 if text:
                     return text
 
-    def _linkPages(self, rect=None):
+    def _linkPages(self, rect: Optional[QRectF] = None) -> Iterator[Tuple[AbstractPage, QRect]]:
         """Internal. Yield the pages allowed for links (and visible in rect if given)."""
         for p, rect in self.visiblePagesAt(rect or self.rect()):
             yield p, rect
@@ -202,52 +226,68 @@ class MultiPage(page.AbstractRenderedPage):
                 break
 
     def linksAt(self, point):
-        """Reimplemented to find links in sub pages."""
+        """Reimplemented to find links in sub-pages."""
         result = []
         for p, rect in self._linkPages():
             if point in rect:
                 result.extend(p.linksAt(point - p.pos()))
         return result
 
-    def linksIn(self, rect):
-        """Reimplemented to find links in sub pages."""
+    def linksIn(self, rect: QRectF):  # TODO - typehint
+        """Reimplemented to find links in sub-pages."""
         result = set()
         for p, rect in self._linkPages(rect):
             result.update(p.linksIn(rect.translated(-p.pos())))
         return result
 
-    def linkRect(self, link):
+    def linkRect(self, link: Link) -> Optional[QRectF]:
         """Reimplemented to get correct area on the page the link belongs to."""
         for p, r in self._linkPages():
             if link in p.links():
                 return p.linkRect(link).translated(p.pos())
-        return QRect()  # just in case
+        return QRect().toRectF()  # just in case
 
 
-class MultiPageDocument(document.MultiSourceDocument):
+class MultiPageDocument(MultiSourceDocument):
     """A Document that combines pages from different documents."""
-    pageClass = MultiPage
-    def createPages(self):
+    pageClass: Type[MultiPage] = MultiPage
+
+    def createPages(self) -> Iterator[AbstractPage]:
         pageLists = [[p.copy() for p in doc.pages()] for doc in self.sources()]
         return self.pageClass.createPages(pageLists, self.renderer)
 
 
-class MultiPageRenderer(render.AbstractRenderer):
-    """A renderer that interfaces with the renderers of the sub pages of a MultiPage."""
-    def update(self, page, device, rect, callback=None):
-        """Reimplemented to check/rerender (if needed) all sub pages."""
+class MultiPageRenderer(AbstractRenderer):
+    """A renderer that interfaces with the renderers of the sub-pages of a MultiPage."""
+    def update(
+        self,
+        page: MultiPage,
+        device: QPaintDevice,
+        rect: QRectF,
+        callback: Optional[Callable] = None  # TODO - complete typehint
+    ) -> bool:
+        """Reimplemented to check/rerender (if needed) all sub-pages."""
         # make the call back return with the original page, not the overlay page
         newcallback = CallBack(callback, page) if callback else None
 
         ok = True
         for p, overlayrect in page.visiblePagesAt(rect):
-            if (overlayrect and p.renderer and
-                    not p.renderer.update(p, device, overlayrect.translated(-p.pos()), newcallback)):
+            if (
+                overlayrect
+                and p.renderer
+                and not p.renderer.update(p, device, overlayrect.translated(-p.pos()).toRectF(), newcallback)
+            ):
                 ok = False
         return ok
 
-    def paint(self, page, painter, rect, callback=None):
-        """Reimplemented to paint all the sub pages on top of each other."""
+    def paint(
+        self,
+        page: AbstractPage,
+        painter: QPainter,
+        rect: QRectF,
+        callback: Optional[Callable] = None  # TODO - complete typehint
+    ) -> None:
+        """Reimplemented to paint all the sub-pages on top of each other."""
         # make the call back return with the original page, not the overlay page
         newcallback = CallBack(callback, page) if callback else None
 
@@ -273,12 +313,22 @@ class MultiPageRenderer(render.AbstractRenderer):
             pixmaps.append((pos, pixmap))
             covered += overlayrect
 
+        if isinstance(rect, QRectF):
+            rect = rect.toRect()  # QRegion takes a QRect - SP
+
         if QRegion(rect).subtracted(covered):
             painter.fillRect(rect, page.paperColor or self.paperColor)
 
         self.combine(painter, pixmaps)
 
-    def image(self, page, rect, dpiX, dpiY, paperColor):
+    def image(
+        self,
+        page: MultiPage,
+        rect: QRectF,
+        dpiX: float,
+        dpiY: float,
+        paperColor: QColor
+    ) -> QImage:
         """Return a QImage of the specified rectangle, of all images combined."""
 
         overlays = []
@@ -299,6 +349,7 @@ class MultiPageRenderer(render.AbstractRenderer):
             else:
                 overlayscale = overlaywidth / p.width
             scale = ourscale / overlayscale
+            # TODO - Handle this QRect/QRectF typing mismatch
             img = p.image(overlayrect.translated(-p.pos()), dpiX * scale, dpiY * scale, paperColor)
             pos = overlayrect.topLeft() - rect.topLeft()
             pos = QPoint(round(pos.x() * hscale), round(pos.y() * vscale))
@@ -309,15 +360,19 @@ class MultiPageRenderer(render.AbstractRenderer):
         self.combine(QPainter(image), overlays)
         return image
 
-    def unschedule(self, pages, callback):
-        """Reimplemented to unschedule all sub pages."""
+    def unschedule(
+        self,
+        pages: Sequence[MultiPage],
+        callback: Callable  # TODO - complete typehint - SP
+    ) -> None:
+        """Reimplemented to unschedule all sub-pages."""
         for page in pages:
             newcallback = CallBack(callback, page) if callback else None
             for p in page.pages:
                 if p.renderer:
                     p.renderer.unschedule((p,), newcallback)
 
-    def invalidate(self, pages):
+    def invalidate(self, pages: Sequence[MultiPage]) -> None:
         """Reimplemented to invalidate the base and overlay pages."""
         renderers = collections.defaultdict(list)
         for page in pages:
@@ -327,7 +382,7 @@ class MultiPageRenderer(render.AbstractRenderer):
         for renderer, pages in renderers.items():
             renderer.invalidate(pages)
 
-    def combine(self, painter, images):
+    def combine(self, painter: QPainter, images: Tuple[QPoint, QPixmap]) -> None:
         """Paints images on the painter.
 
         Each image is a tuple(QPoint, QPixmap), describing where to draw.
@@ -343,7 +398,14 @@ class MultiPageRenderer(render.AbstractRenderer):
 
 class CallBack:
     """A wrapper for a callable that is called with the original Page."""
-    def __new__(cls, origcallable, page):
+    origcallable: Callable
+    page: AbstractPage
+
+    def __new__(
+        cls,
+        origcallable: Callable,  # TODO - complete typehint - SP
+        page: AbstractPage
+    ) -> Union[CallBack, Callable]:
         # if the callable is already a CallBack instance, just return it. This
         # would happen if a MultiPage has a subpage that is also a MultiPage.
         if cls == type(origcallable):
@@ -353,22 +415,19 @@ class CallBack:
         cb.page = page
         return cb
 
-    def __hash__(self):
+    def __hash__(self) -> int:
         """Return the hash of the original callable.
 
         This way only one callback will be in the Job.callbacks attribute,
-        despite of multiple pages, and unscheduling a job with subpages still
+        despite multiple pages, and unscheduling a job with subpages still
         works.
 
         """
         return hash(self.origcallable)
 
-    def __call__(self, page):
+    def __call__(self, page: AbstractPage) -> None:
         """Call the original callback with the original Page."""
         self.origcallable(self.page)
 
-
-
 # install a default renderer, so MultiPage can be used directly
 MultiPage.renderer = MultiPageRenderer()
-

@@ -25,7 +25,7 @@ View mixin class to display QWidgets on top of a Page.
 
 import collections
 
-from PyQt6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, Qt
 
 from . import constants
 from . import util

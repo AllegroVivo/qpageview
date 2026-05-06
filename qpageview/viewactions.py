@@ -26,10 +26,9 @@ ViewActions provides QActions to control a View.
 
 import weakref
 
-from PyQt6.QtCore import pyqtSignal, QObject, Qt
-from PyQt6.QtGui import QAction, QActionGroup, QKeySequence
-from PyQt6.QtWidgets import (
-    QApplication, QComboBox, QLabel, QSpinBox, QWidgetAction)
+from PySide6.QtCore import Signal, QObject, Qt
+from PySide6.QtGui import QAction, QActionGroup, QKeySequence
+from PySide6.QtWidgets import QComboBox, QSpinBox, QWidgetAction
 
 from . import util
 from .constants import *
@@ -53,7 +52,7 @@ class ViewActions(QObject):
 
     smartLayoutOrientationEnabled = True
 
-    viewRequested = pyqtSignal()
+    viewRequested = Signal()
 
     def __init__(self, *args, **kwargs):
         """Create the actions.
@@ -434,7 +433,7 @@ class PagerAction(QWidgetAction):
 
     """
 
-    currentPageNumberChanged = pyqtSignal(int)
+    currentPageNumberChanged = Signal(int)
 
     buttonSymbols = QSpinBox.ButtonSymbols.NoButtons
     focusPolicy = Qt.FocusPolicy.ClickFocus
@@ -539,8 +538,8 @@ class PagerAction(QWidgetAction):
 class ZoomerAction(QWidgetAction):
     """ZoomerAction provides a combobox with view modes and zoom factors."""
 
-    zoomFactorChanged = pyqtSignal(float)
-    viewModeChanged = pyqtSignal(int)
+    zoomFactorChanged = Signal(float)
+    viewModeChanged = Signal(int)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

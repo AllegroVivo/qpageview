@@ -23,12 +23,18 @@
 """
 Rubberband selection in a View.
 """
+from __future__ import annotations
 
+from typing import TYPE_CHECKING, Union, Literal, Optional, Iterator, Tuple, Set
 
-from PyQt6.QtCore import QEvent, QPoint, QRect, QSize, Qt, pyqtSignal
-from PyQt6.QtGui import QColor, QContextMenuEvent, QCursor, QPainter, QPalette, QPen, QRegion
-from PyQt6.QtWidgets import QApplication, QWidget
+from PySide6.QtCore import QEvent, QRect, QSize, Qt, Signal, QPoint
+from PySide6.QtGui import QContextMenuEvent, QCursor, QPainter, QPalette, QPen, QRegion, QPaintEvent, QColor, QImage, QMouseEvent
+from PySide6.QtWidgets import QApplication, QWidget
 
+if TYPE_CHECKING:
+    from .page import AbstractPage
+    from . import View
+    from .link import Link
 
 # dragging/moving selection:
 _OUTSIDE = 0
@@ -38,6 +44,7 @@ _RIGHT   = 4
 _BOTTOM  = 8
 _INSIDE  = 15
 
+Edge = Union[Literal[0, 1, 2, 4, 8, 15], int]
 
 class Rubberband(QWidget):
     """A Rubberband to select a rectangular region.
@@ -62,28 +69,32 @@ class Rubberband(QWidget):
         is only emitted when the mouse button is released.
 
     """
-    selectionChanged = pyqtSignal(QRect)
+    selectionChanged: Signal = Signal(QRect)
 
     # the button used to drag a new rectangle
-    showbutton = Qt.MouseButton.RightButton
+    showbutton: Qt.MouseButton = Qt.MouseButton.RightButton
 
     # the button to alter an existing rectangle
-    dragbutton = Qt.MouseButton.LeftButton
+    dragbutton: Qt.MouseButton = Qt.MouseButton.LeftButton
 
     # whether to continuously track the selection
-    trackSelection = False
+    trackSelection: bool = False
+
+    # Type annotations
+    _draggeom: QRect
+    _dragbutton: Qt.MouseButton
 
     def __init__(self):
         super().__init__()
-        self._dragging = False
-        self._dragedge = 0
-        self._dragpos = None
-        self._selection = QRect()
-        self._layoutOffset = None   # used to keep on spot during resize/zoom
+        self._dragging: bool = False
+        self._dragedge: Edge = 0
+        self._dragpos: Optional[QPoint] = None
+        self._selection: QRect = QRect()
+        self._layoutOffset: Optional = None   # used to keep on spot during resize/zoom
         self.setMouseTracking(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)
 
-    def paintEvent(self, ev):
+    def paintEvent(self, ev: QPaintEvent) -> None:
         ### Paint code contributed by Richard Cognot Jun 2012
         color = self.palette().color(QPalette.ColorRole.Highlight)
         painter = QPainter(self)
@@ -91,7 +102,7 @@ class Rubberband(QWidget):
         # Filled rectangle.
         painter.setClipRect(self.rect())
         color.setAlpha(50)
-        painter.fillRect(self.rect().adjusted(2,2,-2,-2), color)
+        painter.fillRect(self.rect().adjusted(2, 2, -2, -2), color)
 
         # Thin rectangle outside.
         color.setAlpha(150)
@@ -107,7 +118,7 @@ class Rubberband(QWidget):
         painter.setPen(pen)
         painter.setBackgroundMode(Qt.BGMode.OpaqueMode)
         # Clip at 4 corners
-        region = QRegion(QRect(0,0,20,20))
+        region = QRegion(QRect(0, 0, 20, 20))
         region += QRect(self.rect().width()-20, 0, 20, 20)
         region += QRect(self.rect().width()-20, self.rect().height()-20, 20, 20)
         region += QRect(0, self.rect().height()-20, 20, 20)
@@ -119,7 +130,7 @@ class Rubberband(QWidget):
         painter.setClipRegion(region)
         painter.drawRect(self.rect())
 
-    def edge(self, point):
+    def edge(self, point: QPoint) -> Edge:
         """Return the edge where the point touches our geometry."""
         rect = self.geometry()
         if point not in rect:
@@ -135,7 +146,7 @@ class Rubberband(QWidget):
             edge |= _BOTTOM
         return edge or _INSIDE
 
-    def adjustCursor(self, edge):
+    def adjustCursor(self, edge: Edge) -> None:
         """Sets the cursor shape when we are at edge."""
         cursor = None
         if edge in (_TOP, _BOTTOM):
@@ -153,15 +164,15 @@ class Rubberband(QWidget):
         else:
             self.unsetCursor()
 
-    def hasSelection(self):
+    def hasSelection(self) -> bool:
         """Return True when there is a selection."""
         return bool(self._selection)
 
-    def selection(self):
+    def selection(self) -> QRect:
         """Return our selection rectangle, relative to the view's layout position."""
         return self._selection
 
-    def selectedPages(self):
+    def selectedPages(self) -> Iterator[Tuple[AbstractPage, QRect]]:
         """Yield tuples (page, rect) describing the selection.
 
         Every rect is intersected with the page rect and translated to the
@@ -170,12 +181,12 @@ class Rubberband(QWidget):
         """
         rect = self.selection()
         if rect:
-            view = self.parent().parent()
+            view: View = self.parent().parent()  # type: ignore - SP
             layout = view.pageLayout()
             for page in layout.pagesAt(rect):
                 yield page, rect.intersected(page.geometry()).translated(-page.pos())
 
-    def selectedPage(self):
+    def selectedPage(self) -> Tuple[Optional[AbstractPage], Optional[QRect]]:
         """Returns (page, rect) if there is a selection.
 
         If the selection contains more pages, the largest intersection is chosen.
@@ -188,7 +199,11 @@ class Rubberband(QWidget):
         else:
             return None, None
 
-    def selectedImage(self, resolution=None, paperColor=None):
+    def selectedImage(
+        self,
+        resolution: Optional[int] = None,
+        paperColor: Optional[QColor] = None
+    ) -> Optional[QImage]:
         """Returns an image of the selected part on a Page.
 
         If resolution is None, the displayed size is chosen. Otherwise, the
@@ -198,7 +213,7 @@ class Rubberband(QWidget):
         page, rect = self.selectedPage()
         if page and rect:
             if resolution is None:
-                view = self.parent().parent()
+                view: View = self.parent().parent()  # type: ignore - SP
                 try:
                     ratio = view.devicePixelRatioF()
                 except AttributeError:
@@ -206,14 +221,14 @@ class Rubberband(QWidget):
                 resolution = view.physicalDpiX() * view.zoomFactor() * ratio
             return page.image(rect, resolution, resolution, paperColor)
 
-    def selectedText(self):
+    def selectedText(self) -> str:
         """Return the text found in the selection, as far as the pages support it."""
         result = []
         for page, rect in self.selectedPages():
             result.append(page.text(rect))
         return '\n'.join(result)
 
-    def selectedLinks(self):
+    def selectedLinks(self) -> Iterator[Tuple[AbstractPage, Set[Link]]]:
         """Yield tuples (page, links) for every page in the selection.
 
         links is a non-empty set() of Link instances on that page that intersect
@@ -225,10 +240,10 @@ class Rubberband(QWidget):
             if links:
                 yield page, links
 
-    def setSelection(self, rect):
+    def setSelection(self, rect: QRect) -> None:
         """Sets the selection, the rectangle should be relative to the view's layout position."""
         if rect:
-            view = self.parent().parent()
+            view: View = self.parent().parent()  # type: ignore - SP
             geom = rect.translated(view.layoutPosition())
             self.setGeometry(geom)
             self._setLayoutOffset(geom.topLeft())
@@ -239,13 +254,13 @@ class Rubberband(QWidget):
             self.hide()
             self._setSelectionFromGeometry(QRect())
 
-    def clearSelection(self):
+    def clearSelection(self) -> None:
         """Hide ourselves and clear the selection."""
         self.hide()
         self._dragging = False
         self._setSelectionFromGeometry(QRect())
 
-    def _setSelectionFromGeometry(self, rect):
+    def _setSelectionFromGeometry(self, rect: QRect) -> None:
         """(Internal) Called to emit the selectionChanged signal.
 
         Only emits the signal when the selection really changed.
@@ -253,28 +268,28 @@ class Rubberband(QWidget):
 
         """
         if rect:
-            view = self.parent().parent()
+            view: View = self.parent().parent()  # type: ignore - SP
             rect = rect.translated(-view.layoutPosition())
         old, self._selection = self._selection, rect
         if rect != old:
             self.selectionChanged.emit(rect)
 
-    def _setLayoutOffset(self, pos):
+    def _setLayoutOffset(self, pos: QPoint) -> None:
         """Store the position as offset from the layout, and also from the page
         at that position. Used for keeping the same spot on zoom change.
 
         """
-        view = self.parent().parent()
+        view: View = self.parent().parent()  # type: ignore - SP
         pos = pos - view.layoutPosition()
         self._layoutOffset = view.pageLayout().pos2offset(pos)
 
-    def _getLayoutOffset(self):
+    def _getLayoutOffset(self) -> QPoint:
         """Get the stored layout offset position back, after zoom or move."""
-        view = self.parent().parent()
+        view: View = self.parent().parent()  # type: ignore - SP
         pos = view.pageLayout().offset2pos(self._layoutOffset)
         return pos + view.layoutPosition()
 
-    def scrollBy(self, diff):
+    def scrollBy(self, diff: QPoint) -> None:
         """Called by the View when scrolling."""
         if not self._dragging:
             self.move(self.pos() + diff)
@@ -286,7 +301,7 @@ class Rubberband(QWidget):
         elif self.isVisible() and self.trackSelection:
             self._setSelectionFromGeometry(self.geometry())
 
-    def startDrag(self, pos, button):
+    def startDrag(self, pos: QPoint, button: Qt.MouseButton) -> None:
         """Start dragging the rubberband."""
         self._dragging = True
         self._dragpos = pos
@@ -294,23 +309,25 @@ class Rubberband(QWidget):
         self._draggeom = self.geometry()
         self._dragbutton = button
 
-    def drag(self, pos):
+    def drag(self, pos: QPoint):
         """Continue dragging the rubberband, scrolling the View if necessary."""
+        assert self._dragpos is not None  # for type checker - SP
         diff = pos - self._dragpos
         self._dragpos = pos
         self.dragBy(diff)
         # check if we are dragging close to the edge of the view, scroll if needed
-        view = self.parent().parent()
+        view: View = self.parent().parent()  # type: ignore - SP
         view.scrollForDragging(pos)
 
-    def dragBy(self, diff):
+    def dragBy(self, diff: QPoint) -> None:
         """Drag by diff (QPoint)."""
         edge = self._dragedge
         self._draggeom.adjust(
             diff.x() if edge & _LEFT   else 0,
             diff.y() if edge & _TOP    else 0,
             diff.x() if edge & _RIGHT  else 0,
-            diff.y() if edge & _BOTTOM else 0)
+            diff.y() if edge & _BOTTOM else 0
+        )
         geom = self._draggeom.normalized()
         if geom.isValid():
             self.setGeometry(geom)
@@ -321,11 +338,11 @@ class Rubberband(QWidget):
             bdiag = (edge in (3, 12)) ^ (self._draggeom.width() * self._draggeom.height() >= 0)
             self.setCursor(Qt.CursorShape.SizeBDiagCursor if bdiag else Qt.CursorShape.SizeFDiagCursor)
 
-    def stopDrag(self):
+    def stopDrag(self) -> None:
         """Stop dragging the rubberband."""
         self._dragging = False
         # TODO: use the kinetic scroller if implemented
-        view = self.parent().parent()
+        view: View = self.parent().parent()  # type: ignore - SP
         view.stopScrolling()
 
         if self.width() < 8 and self.height() < 8:
@@ -335,28 +352,28 @@ class Rubberband(QWidget):
             self._setSelectionFromGeometry(self.geometry())
             self._setLayoutOffset(self.pos())
 
-    def slotZoomChanged(self, zoom):
+    def slotZoomChanged(self, zoom: float) -> None:
         """Called when the zooming in the view changes, resizes ourselves."""
         if self.hasSelection():
             view = self.parent().parent()
-            factor =  zoom / self._oldZoom
+            factor = zoom / self._oldZoom
             self._oldZoom = zoom
             geom = QRect(self._getLayoutOffset(), self.size() * factor)
             self.setGeometry(geom)
             self._setSelectionFromGeometry(geom)
 
-    def eventFilter(self, viewport, ev):
+    def eventFilter(self, viewport, ev: QMouseEvent) -> bool:
         """Act on events in the viewport:
 
         * keep on the same place when the viewport resizes
         * start dragging the selection if showbutton clicked (preventing the
           contextmenu if the showbutton is the right button)
-        * end a drag on mousebutton release, if that button would have shown
+        * end a drag on mousebutton release, if that button had shown
           the context menu, show it on button release.
 
         """
         if ev.type() == QEvent.Type.Resize and self.isVisible():
-            view = self.parent().parent()
+            view: View = self.parent().parent()  # type: ignore - SP
             if not view.viewMode():
                 # fixed scale, try to keep ourselves in the same position on resize
                 self.move(self._getLayoutOffset())

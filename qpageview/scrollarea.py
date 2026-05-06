@@ -27,8 +27,8 @@ import math
 
 # we use util.Point here rather than raw QPoint to prevent an overflow
 # during rapid kinetic scrolling (Frescobaldi issue #2130)
-from PyQt6.QtCore import QRect, QSize, Qt
-from PyQt6.QtWidgets import QAbstractScrollArea
+from PySide6.QtCore import QRect, QSize, Qt
+from PySide6.QtWidgets import QAbstractScrollArea
 
 from . import util
 

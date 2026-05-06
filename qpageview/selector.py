@@ -28,9 +28,9 @@ Adds the capability to select or unselect Pages.
 
 import contextlib
 
-from PyQt6.QtCore import pyqtSignal, QRect, Qt
-from PyQt6.QtGui import QPainter, QKeySequence
-from PyQt6.QtWidgets import QStyle, QStyleOptionButton
+from PySide6.QtCore import Signal, QRect, Qt
+from PySide6.QtGui import QPainter, QKeySequence
+from PySide6.QtWidgets import QStyle, QStyleOptionButton
 
 
 class SelectorViewMixin:
@@ -48,8 +48,8 @@ class SelectorViewMixin:
         when you want to use the long mouse press event.)
 
     """
-    selectionChanged = pyqtSignal()
-    selectionModeChanged = pyqtSignal(bool)
+    selectionChanged = Signal()
+    selectionModeChanged = Signal(bool)
 
     userChangeSelectionModeEnabled = True
 
@@ -155,7 +155,7 @@ class SelectorViewMixin:
             if page:
                 pageNum = self._pageLayout.index(page) + 1
                 pos -= page.pos()
-                if pos in QRect(0, 0, QStyle.PixelMetric.PM_IndicatorWidth, QStyle.PixelMetric.PM_IndicatorHeight):
+                if QRect(0, 0, QStyle.PixelMetric.PM_IndicatorWidth, QStyle.PixelMetric.PM_IndicatorHeight).contains(pos):
                     # the indicator has been clicked
                     if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:
                         # CTRL toggles selection of page

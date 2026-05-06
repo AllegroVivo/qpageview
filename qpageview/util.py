@@ -27,9 +27,9 @@ Small utilities and simple base classes for the qpageview module.
 import collections
 import contextlib
 
-from PyQt6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
-from PyQt6.QtGui import QBitmap, QMouseEvent, QRegion
-from PyQt6.QtWidgets import QApplication
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt
+from PySide6.QtGui import QBitmap, QMouseEvent, QRegion
+from PySide6.QtWidgets import QApplication
 
 
 class Rectangular:

@@ -28,26 +28,44 @@ This way we can easily compute where the link area is on a page in different
 sizes or rotations.
 
 """
+from __future__ import annotations
 
-import collections
+from typing import TYPE_CHECKING, NamedTuple, Optional, Any, Tuple
 
-from PyQt6.QtCore import pyqtSignal, QEvent, QRectF, Qt
+from PySide6.QtCore import Signal, QEvent, QRectF, Qt, QPoint
+from PySide6.QtGui import QMouseEvent
+from PySide6.QtWidgets import QWidget
 
-from . import page
-from . import rectangles
+from .page import AbstractPage
+from .rectangles import Rectangles
 
-Area = collections.namedtuple("Area", "left top right bottom")
+if TYPE_CHECKING:
+    from .highlight import Highlighter
+    from . import View
 
+class Area(NamedTuple):
+    left: float
+    top: float
+    right: float
+    bottom: float
 
 class Link:
-    fileName = ""
-    isExternal = False
-    targetPage = -1
-    url = ""
-    tooltip = ""
-    area = Area(0, 0, 0, 0)
+    fileName: str = ""
+    isExternal: bool = False
+    targetPage: int = -1
+    url: str = ""
+    tooltip: str = ""
+    area: Area = Area(0, 0, 0, 0)
 
-    def __init__(self, left, top, right, bottom, url=None, tooltip=None):
+    def __init__(
+        self,
+        left: float,
+        top: float,
+        right: float,
+        bottom: float,
+        url: Optional[str] = None,
+        tooltip: Optional[str] = None
+    ):
         self.area = Area(left, top, right, bottom)
         if url:
             self.url = url
@@ -56,51 +74,50 @@ class Link:
         if tooltip:
             self.tooltip = tooltip
 
-    def rect(self):
+    def rect(self) -> QRectF:
         """Return the area attribute as a QRectF()."""
         r = QRectF()
         r.setCoords(*self.area)
         return r
 
 
-class Links(rectangles.Rectangles):
+class Links(Rectangles):
     """Manages a list of Link objects.
 
     See the rectangles documentation for how to access the links.
 
     """
-    def get_coords(self, link):
+    def get_coords(self, link: Link) -> Area:
         return link.area
-
 
 class LinkViewMixin:
     """Mixin class to enhance view.View with link capabilities."""
 
     #: (page, link) emitted when the user hovers a link
-    linkHovered = pyqtSignal(page.AbstractPage, Link)
+    linkHovered: Signal = Signal(AbstractPage, Link)
 
     #: (no args) emitted when the user does not hover a link anymore
-    linkLeft = pyqtSignal()
+    linkLeft: Signal = Signal()
 
     #: (event, page, link) emitted when the user clicks a link
-    linkClicked = pyqtSignal(QEvent, page.AbstractPage, Link)
+    linkClicked: Signal = Signal(QEvent, AbstractPage, Link)
 
-    #: (event, page, link) emitted when a What's This or Toolip is requested.
+    #: (event, page, link) emitted when a What's This or Tooltip is requested.
     #: The event's type determines the type of this help event.
-    linkHelpRequested = pyqtSignal(QEvent, page.AbstractPage, Link)
+    linkHelpRequested: Signal = Signal(QEvent, AbstractPage, Link)
 
     #: whether to actually enable Link handling
-    linksEnabled = True
+    linksEnabled: bool = True
 
-    def __init__(self, parent=None, **kwds):
-        self._currentLinkId = None
-        self._linkHighlighter = None
-        super().__init__(parent, **kwds)
+    def __init__(self, parent: Optional[QWidget] = None, **kwargs: Any):
+        self._currentLinkId: Optional[int] = None
+        self._linkHighlighter: Optional[Highlighter] = None
+        super().__init__(parent, **kwargs)
 
-    def setLinkHighlighter(self, highlighter):
+    def setLinkHighlighter(self, highlighter: Optional[Highlighter]) -> None:
         """Sets a Highlighter (see highlight.py) to highlight a link on hover.
 
-        Use None to remove an active Highlighter. By default no highlighter is
+        Use None to remove an active Highlighter. By default, no highlighter is
         set to highlight links on hover.
 
         To be able to actually *use* highlighting, be sure to also mix in the
@@ -109,16 +126,16 @@ class LinkViewMixin:
         """
         self._linkHighlighter = highlighter
 
-    def linkHighlighter(self):
+    def linkHighlighter(self) -> Optional[Highlighter]:
         """Return the currently set Highlighter, if any.
 
-        By default no highlighter is set to highlight links on hover, and None
+        By default, no highlighter is set to highlight links on hover, and None
         is returned in that case.
 
         """
         return self._linkHighlighter
 
-    def adjustCursor(self, pos):
+    def adjustCursor(self, pos: QPoint) -> None:
         """Adjust the cursor if pos is on a link (and linksEnabled is True).
 
         Also emits signals when the cursor enters or leaves a link.
@@ -135,15 +152,16 @@ class LinkViewMixin:
                     self.linkHoverLeave()
                 self._currentLinkId = lid
                 if lid is not None:
+                    assert page and link  # for type checker - SP
                     self.linkHoverEnter(page, link)
             if link:
-                return # do not call super() if we are on a link
+                return  # do not call super() if we are on a link
         super().adjustCursor(pos)
 
-    def linkAt(self, pos):
+    def linkAt(self: View, pos: QPoint) -> Tuple[Optional[AbstractPage], Optional[Link]]:
         """If the pos (in the viewport) is over a link, return a (page, link) tuple.
 
-        Otherwise returns (None, None).
+        Otherwise, returns (None, None).
 
         """
         pos = pos - self.layoutPosition()
@@ -154,7 +172,7 @@ class LinkViewMixin:
                 return page, links[0]
         return None, None
 
-    def linkHoverEnter(self, page, link):
+    def linkHoverEnter(self: View, page: AbstractPage, link: Link) -> None:
         """Called when the mouse hovers over a link.
 
         The default implementation emits the linkHovered(page, link) signal,
@@ -168,7 +186,7 @@ class LinkViewMixin:
         if self._linkHighlighter:
             self.highlight({page: [link.rect()]}, self._linkHighlighter, 3000)
 
-    def linkHoverLeave(self):
+    def linkHoverLeave(self) -> None:
         """Called when the mouse does not hover a link anymore.
 
         The default implementation emits the linkLeft() signal, sets a default
@@ -182,7 +200,7 @@ class LinkViewMixin:
         if self._linkHighlighter:
             self.clearHighlight(self._linkHighlighter)
 
-    def linkClickEvent(self, ev, page, link):
+    def linkClickEvent(self, ev: QMouseEvent, page: AbstractPage, link: Link) -> None:
         """Called when a link is clicked.
 
         The default implementation emits the linkClicked(event, page, link)
@@ -192,7 +210,7 @@ class LinkViewMixin:
         """
         self.linkClicked.emit(ev, page, link)
 
-    def linkHelpEvent(self, ev, page, link):
+    def linkHelpEvent(self, ev: QMouseEvent, page: AbstractPage, link: Link) -> None:
         """Called when a ToolTip or WhatsThis wants to appear.
 
         The default implementation emits the linkHelpRequested(event, page, link)
@@ -202,7 +220,7 @@ class LinkViewMixin:
         """
         self.linkHelpRequested.emit(ev, page, link)
 
-    def event(self, ev):
+    def event(self, ev: QMouseEvent) -> bool:
         """Reimplemented to handle HelpEvent for links."""
         if self.linksEnabled and ev.type() in (QEvent.Type.ToolTip, QEvent.Type.WhatsThis):
             page, link = self.linkAt(ev.pos())
@@ -211,7 +229,7 @@ class LinkViewMixin:
                 return True
         return super().event(ev)
 
-    def mousePressEvent(self, ev):
+    def mousePressEvent(self, ev: QMouseEvent) -> None:
         """Implemented to detect clicking a link and calling linkClickEvent()."""
         if self.linksEnabled:
             page, link = self.linkAt(ev.pos())
@@ -220,11 +238,9 @@ class LinkViewMixin:
                 return
         super().mousePressEvent(ev)
 
-    def leaveEvent(self, ev):
+    def leaveEvent(self, ev: QMouseEvent) -> None:
         """Implemented to leave a link, might there still be one hovered."""
         if self.linksEnabled and self._currentLinkId is not None:
             self.linkHoverLeave()
             self._currentLinkId = None
         super().leaveEvent(ev)
-
-

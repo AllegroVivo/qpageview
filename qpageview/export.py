@@ -22,14 +22,31 @@
 """
 Export Pages to different file formats.
 """
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, TypeVar, Union, Optional, Sequence
 
 import os
 
-from PyQt6.QtCore import QBuffer, QIODevice, QMimeData, QPoint, QSizeF, Qt, QUrl
-from PyQt6.QtGui import QDrag, QGuiApplication, QImage, QPageSize, QPdfWriter
+from PySide6.QtCore import (
+    QBuffer, QMimeData, QPoint, QSizeF, Qt, QUrl, QRectF, QByteArray, QObject
+)
+from PySide6.QtGui import (
+    QDrag, QGuiApplication, QImage, QPageSize, QPdfWriter, QColor, QPixmap
+)
 
 from . import util
 
+if TYPE_CHECKING:
+    from .typeinfo import MimeType
+    from .page import AbstractPage
+    from .document import AbstractSourceDocument
+    from .render import AbstractRenderer
+    from .image import ImageDocument
+    from .svg import SvgDocument
+    from .pdf import PdfDocument
+
+TPage = TypeVar("TPage")
 
 class AbstractExporter:
     """Base class to export a rectangular area of a Page to a file.
@@ -55,32 +72,41 @@ class AbstractExporter:
     whether an attribute is supported or not.
 
     """
+    # Typehints
+    _page: AbstractPage
+    _rect: QRectF
+    _result: Optional[Union[QByteArray, bytes]]
+    _tempFile: Optional[str]
+    _autoCropRect: Optional[QRectF]
+    _document: Optional[AbstractSourceDocument]
+    _pixmap: Optional[QPixmap]
+
     # user settings:
-    resolution = 300
-    antialiasing = True
-    autocrop = False
-    oversample = 1
-    grayscale = False
-    paperColor = None
+    resolution: int = 300
+    antialiasing: bool = True
+    autocrop: bool = False
+    oversample: int = 1
+    grayscale: bool = False
+    paperColor: QColor = None
 
     # properties of exporter:
-    wantsVector = True
-    supportsResolution = True
-    supportsAntialiasing = True
-    supportsAutocrop = True
-    supportsOversample = True
-    supportsGrayscale = True
-    supportsPaperColor = True
+    wantsVector: bool = True
+    supportsResolution: bool = True
+    supportsAntialiasing: bool = True
+    supportsAutocrop: bool = True
+    supportsOversample: bool = True
+    supportsGrayscale: bool = True
+    supportsPaperColor: bool = True
 
-    mimeType = "application/octet-stream"
-    filename = ""
-    defaultBasename = "document"
-    defaultExt = ""
+    mimeType: MimeType = "application/octet-stream"
+    filename: str = ""
+    defaultBasename: str = "document"
+    defaultExt: str = ""
 
-    def __init__(self, page, rect=None):
+    def __init__(self, page: TPage, rect=None):
         self.setPage(page, rect)
 
-    def setPage(self, page, rect=None):
+    def setPage(self, page: TPage, rect=None):
         self._page = page.copy()
         if self._page.renderer:
             self._page.renderer = page.renderer.copy()
@@ -91,7 +117,7 @@ class AbstractExporter:
         self._document = None
         self._pixmap = None
 
-    def page(self):
+    def page(self) -> TPage:
         """Return our page, setting the renderer to our preferences."""
         p = self._page.copy()
         p.paperColor = self.paperColor
@@ -101,8 +127,8 @@ class AbstractExporter:
             p.renderer.antialiasing = self.antialiasing
         return p
 
-    def autoCroppedRect(self):
-        """Return the rect, autocropped if desired."""
+    def autoCroppedRect(self) -> QRectF:
+        """Return the rect, auto-cropped if desired."""
         if not self.autocrop:
             return self._rect
         if self._autoCropRect is None:
@@ -114,24 +140,27 @@ class AbstractExporter:
             # add one pixel to prevent loosing small joins or curves etc
             rect = image.rect() & rect.adjusted(-1, -1, 1, 1)
             if self._rect is not None:
-                rect.translate(self._rect.topLeft())
+                rect.translate(self._rect.topLeft())  # TODO - this is expecting a QPoint, but getting QPointF? - SP
             self._autoCropRect = rect
+        assert self._autoCropRect  # for type checker - SP
         return self._autoCropRect
 
-    def export(self):
+    def export(self) -> Optional[Union[QByteArray, bytes]]:
         """Perform the export, based on the settings, and return the exported data object."""
+        pass
 
-    def successful(self):
+    def successful(self) -> bool:
         """Return True when export was successful."""
         return self.data() is not None
 
-    def data(self):
+    def data(self) -> Union[QByteArray, bytes]:
         """Return the export result, assuming it is binary data of the exported file."""
         if self._result is None:
             self._result = self.export()
+        assert self._result  # for type checker - SP
         return self._result
 
-    def document(self):
+    def document(self) -> AbstractSourceDocument:
         """Return a one-page Document to display the image to export.
 
         Internally calls createDocument(), and caches the result, setting the
@@ -144,31 +173,33 @@ class AbstractExporter:
             if self.paperColor and self.paperColor.isValid():
                 for p in doc.pages():
                     p.paperColor = self.paperColor
+        assert self._document  # for type checker - SP
         return self._document
 
-    def createDocument(self):
+    def createDocument(self) -> AbstractSourceDocument:
         """Create and return a one-page Document to display the image to export."""
+        pass
 
-    def renderer(self):
+    def renderer(self) -> Optional[AbstractRenderer]:
         """Return a renderer for the document(). By default, None is returned."""
         return None
 
-    def copyData(self):
+    def copyData(self) -> None:
         """Copy the QMimeData() to the clipboard."""
         QGuiApplication.clipboard().setMimeData(self.mimeData())
 
-    def mimeData(self):
+    def mimeData(self) -> QMimeData:
         """Return a QMimeData() object representing the exported data."""
         data = QMimeData()
         data.setData(self.mimeType, self.data())
         return data
 
-    def save(self, filename):
+    def save(self, filename: str) -> None:
         """Save the exported image to a file."""
         with open(filename, "wb") as f:
-            f.write(self.data())
+            f.write(self.data())  # type: ignore - QByteArray and bytes are both buffered binary data, so this should work fine - SP
 
-    def suggestedFilename(self):
+    def suggestedFilename(self) -> str:
         """Return a suggested file name for the file to export.
 
         The name is based on the filename (if set) and also contains the
@@ -185,7 +216,7 @@ class AbstractExporter:
             name = self.defaultBasename + self.defaultExt
         return name
 
-    def tempFilename(self):
+    def tempFilename(self) -> str:
         """Save data() to a tempfile and returns the filename."""
         if self._tempFile is None:
             if self.filename:
@@ -195,27 +226,29 @@ class AbstractExporter:
             d = util.tempdir()
             fname = self._tempFile = os.path.join(d, basename + self.defaultExt)
             self.save(fname)
+        assert self._tempFile  # for type checker - SP
         return self._tempFile
 
-    def tempFileMimeData(self):
+    def tempFileMimeData(self) -> QMimeData:
         """Save the exported image to a temp file and return a QMimeData object for the url."""
         data = QMimeData()
         data.setUrls([QUrl.fromLocalFile(self.tempFilename())])
         return data
 
-    def copyFile(self):
+    def copyFile(self) -> None:
         """Save the exported image to a temp file and copy its name to the clipboard."""
         QGuiApplication.clipboard().setMimeData(self.tempFileMimeData())
 
-    def pixmap(self, size=100):
+    def pixmap(self, size=100) -> QPixmap:
         """Return a small pixmap to use for dragging etc."""
         if self._pixmap is None:
             paperColor = self.paperColor if self.supportsPaperColor else None
             page = self.document().pages()[0]
             self._pixmap = page.pixmap(paperColor=paperColor)
+        assert self._pixmap  # for type checker - SP
         return self._pixmap
 
-    def drag(self, parent, mimeData):
+    def drag(self, parent: QObject, mimeData: QMimeData) -> Qt.DropAction:
         """Called by dragFile and dragData. Execs a QDrag on the mime data."""
         d = QDrag(parent)
         d.setMimeData(mimeData)
@@ -223,11 +256,11 @@ class AbstractExporter:
         d.setHotSpot(QPoint(-10, -10))
         return d.exec(Qt.DropAction.CopyAction)
 
-    def dragData(self, parent):
+    def dragData(self, parent: QObject) -> Qt.DropAction:
         """Start dragging the data. Parent can be any QObject."""
         return self.drag(parent, self.mimeData())
 
-    def dragFile(self, parent):
+    def dragFile(self, parent: QObject) -> Qt.DropAction:
         """Start dragging the data. Parent can be any QObject."""
         return self.drag(parent, self.tempFileMimeData())
 
@@ -238,7 +271,7 @@ class ImageExporter(AbstractExporter):
     defaultBasename = "image"
     defaultExt = ".png"
 
-    def export(self):
+    def export(self) -> QImage:
         """Create the QImage representing the exported image."""
         res = self.resolution
         if self.oversample != 1:
@@ -255,35 +288,35 @@ class ImageExporter(AbstractExporter):
         i.setDotsPerMeterY(int(res / .0254))
         return i
 
-    def image(self):
-        return self.data()
+    def image(self) -> QImage:
+        return self.data()  # TODO - this works because export() returns a QImage, and data() caches the result of export() - SP
 
-    def createDocument(self):
+    def createDocument(self) -> ImageDocument:
         from . import image
         return image.ImageDocument([self.image()], self.renderer())
 
-    def copyData(self):
+    def copyData(self) -> None:
         QGuiApplication.clipboard().setImage(self.image())
 
-    def mimeData(self):
+    def mimeData(self) -> QMimeData:
         data = QMimeData()
         data.setImageData(self.image())
         return data
 
-    def save(self, filename):
+    def save(self, filename: str) -> None:
         if not self.image().save(filename):
             raise OSError("Could not save image")
 
 
 class SvgExporter(AbstractExporter):
-    """Export a rectangular area of a Page (or the whole page) to a SVG file."""
+    """Export a rectangular area of a Page (or the whole page) to an SVG file."""
     mimeType = "image/svg"
     supportsGrayscale = False
     supportsOversample = False
     defaultBasename = "image"
     defaultExt = ".svg"
 
-    def export(self):
+    def export(self) -> Optional[Union[QByteArray, bytes]]:
         rect = self.autoCroppedRect()
         buf = QBuffer()
         buf.open(QBuffer.OpenModeFlag.WriteOnly)
@@ -292,7 +325,7 @@ class SvgExporter(AbstractExporter):
         if success:
             return buf.data()
 
-    def createDocument(self):
+    def createDocument(self) -> SvgDocument:
         from . import svg
         return svg.SvgDocument([self.data()], self.renderer())
 
@@ -304,7 +337,7 @@ class PdfExporter(AbstractExporter):
     supportsOversample = False
     defaultExt = ".pdf"
 
-    def export(self):
+    def export(self) -> Optional[Union[QByteArray, bytes]]:
         rect = self.autoCroppedRect()
         buf = QBuffer()
         buf.open(QBuffer.OpenModeFlag.WriteOnly)
@@ -313,12 +346,17 @@ class PdfExporter(AbstractExporter):
         if success:
             return buf.data()
 
-    def createDocument(self):
+    def createDocument(self) -> PdfDocument:
         from . import pdf
         return pdf.PdfDocument(self.data(), self.renderer())
 
 
-def pdf(filename, pageList, resolution=72, paperColor=None):
+def pdf(
+    filename: str,
+    pageList: Sequence[AbstractPage],
+    resolution: int = 72,
+    paperColor: Optional[QColor] = None
+) -> None:
     """Export the pages in pageList to a PDF document.
 
     filename can be a string or any QIODevice. The pageList is a list of the
@@ -350,10 +388,8 @@ def pdf(filename, pageList, resolution=72, paperColor=None):
         if n:
             pdf.newPage()
         layout = pdf.pageLayout()
-        layout.setMode(layout.FullPageMode)
-        layout.setPageSize(QPageSize(targetSize * 72.0 / page.dpi, QPageSize.Unit.Point))
+        layout.setMode(layout.Mode.FullPageMode)
+        layout.setPageSize(QPageSize(targetSize * 72.0 / page.dpi, QPageSize.Unit.Point))  # TODO - this is expecting a QSize, but getting QSizeF? - SP
         pdf.setPageLayout(layout)
         # TODO handle errors?
         page.output(pdf, source, paperColor)
-
-

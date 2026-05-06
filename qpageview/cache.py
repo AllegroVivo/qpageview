@@ -22,16 +22,25 @@
 """
 Cache logic.
 """
+from __future__ import annotations
 
-import weakref
+from typing import TYPE_CHECKING, List, Tuple, Dict, Any
+
+from weakref import WeakKeyDictionary
 import time
+
+from PySide6.QtGui import QImage
+
+if TYPE_CHECKING:
+    from .image import ImagePage
+    from .render import Key, Tile
 
 
 class ImageEntry:
-    def __init__(self, image):
-        self.image = image
-        self.bcount = image.sizeInBytes()
-        self.time = time.time()
+    def __init__(self, image: QImage):
+        self.image: QImage = image
+        self.bcount: int = image.sizeInBytes()
+        self.time: float = time.time()
 
 
 class ImageCache:
@@ -40,25 +49,25 @@ class ImageCache:
     Store and retrieve them under a key (see render.Renderer.key()).
 
     """
-    maxsize = 209715200 # 200M
-    currentsize = 0
+    maxsize: int = 209715200  # 200MB
+    currentsize: int = 0
 
     def __init__(self):
-        self._cache = weakref.WeakKeyDictionary()
+        self._cache: WeakKeyDictionary = WeakKeyDictionary()  # TODO - more specific type annotation - SP
 
-    def clear(self):
+    def clear(self) -> None:
         """Remove all cached images."""
         self._cache.clear()
         self.currentsize = 0
 
-    def invalidate(self, page):
+    def invalidate(self, page: ImagePage) -> None:
         """Clear cache contents for the specified page."""
         try:
             del self._cache[page.group()][page.ident()]
         except KeyError:
             pass
 
-    def tileset(self, key):
+    def tileset(self, key: Key):  # TODO - return type annotation - SP
         """Return a dictionary with tile-entry pairs for the key.
 
         If no single tile is available, an empty dict is returned.
@@ -69,7 +78,7 @@ class ImageCache:
         except KeyError:
             return {}
 
-    def addtile(self, key, tile, image):
+    def addtile(self, key: Key, tile: Tile, image: QImage) -> None:
         """Add image for the specified key and tile."""
         d = self._cache.setdefault(key.group, {}).setdefault(key.ident, {}).setdefault(key[2:], {})
         try:
@@ -89,12 +98,16 @@ class ImageCache:
         # cache groups may have disappeared so count all images
 
         entries = iter(sorted(
-            ((entry.time, entry.bcount, group, ident, key, tile)
-            for group, identd in self._cache.items()
+            (
+                (entry.time, entry.bcount, group, ident, key, tile)
+                for group, identd in self._cache.items()
                 for ident, keyd in identd.items()
-                    for key, tiled in keyd.items()
-                        for tile, entry in tiled.items()),
-            key=(lambda item: item[:2]), reverse=True))
+                for key, tiled in keyd.items()
+                for tile, entry in tiled.items()
+            ),
+            key=(lambda item: item[:2]),
+            reverse=True
+        ))
 
         # now count the newest images until maxsize ...
         currentsize = 0
@@ -113,7 +126,7 @@ class ImageCache:
                     if not self._cache[group]:
                         del self._cache[group]
 
-    def closest(self, key):
+    def closest(self, key: Key) -> List[Tuple[int, int, Dict[Tile, ImageEntry]]]:
         """Iterate over suitable image tilesets but with a different size.
 
         Yields (width, height, tileset) tuples.
@@ -126,7 +139,7 @@ class ImageCache:
         try:
             keyd = self._cache[key.group][key.ident]
         except KeyError:
-            return ()
+            return []
 
         # prevent returning images that are too small
         minwidth = min(100, key.width / 2)
@@ -134,7 +147,8 @@ class ImageCache:
         suitable = [
             (k[1], k[2], tileset)
             for k, tileset in keyd.items()
-                if k[0] == key.rotation and k[1] != key.width and k[1] > minwidth]
+            if k[0] == key.rotation
+            and k[1] != key.width
+            and k[1] > minwidth
+        ]
         return sorted(suitable, key=lambda s: abs(1 - s[0] / key.width))
-
-

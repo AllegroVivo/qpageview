@@ -20,13 +20,13 @@
 # See http://www.gnu.org/licenses/ for more information.
 
 """
-A page that can display a SVG document.
+A page that can display an SVG document.
 
 """
 
-from PyQt6.QtCore import QRect, QRectF, Qt
-from PyQt6.QtGui import QColor, QPainter
-from PyQt6.QtSvg import QSvgRenderer
+from PySide6.QtCore import QRectF, Qt
+from PySide6.QtGui import QPainter
+from PySide6.QtSvg import QSvgRenderer
 
 from .constants import (
     Rotate_0,

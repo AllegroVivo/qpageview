@@ -22,17 +22,22 @@
 """
 Printing facilities for qpageview.
 """
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, List, Tuple, Optional
+
+from PySide6.QtCore import Signal
+from PySide6.QtGui import QPainter, QTransform
+from PySide6.QtWidgets import QMessageBox, QProgressDialog, QWidget
+from PySide6.QtPrintSupport import QPrinter
+
+from .backgroundjob import Job
+
+if TYPE_CHECKING:
+    from .page import AbstractPage
 
 
-from PyQt6.QtCore import pyqtSignal
-from PyQt6.QtGui import QPainter, QTransform
-from PyQt6.QtWidgets import QMessageBox, QProgressDialog
-from PyQt6.QtPrintSupport import QPrinter
-
-from . import backgroundjob
-
-
-class PrintJob(backgroundjob.Job):
+class PrintJob(Job):
     """Performs a print job in the background.
 
     Emits the following signals:
@@ -43,11 +48,16 @@ class PrintJob(backgroundjob.Job):
             when done
 
     """
-    progress = pyqtSignal(int, int, int)
+    progress: Signal = Signal(int, int, int)
 
-    aborted = False
+    aborted: bool = False
 
-    def __init__(self, printer, pageList, parent=None):
+    def __init__(
+        self,
+        printer: QPrinter,
+        pageList: List[Tuple[int, AbstractPage]],
+        parent=None
+    ):
         """Initialize with a QPrinter object and a list of pages.
 
         pageList may be a list of two-tuples (num, page). Otherwise, the pages
@@ -58,7 +68,7 @@ class PrintJob(backgroundjob.Job):
         self.printer = printer
         self.setPageList(pageList)
 
-    def setPageList(self, pageList):
+    def setPageList(self, pageList: List[Tuple[int, AbstractPage]]) -> None:
         """Set the pagelist to print.
 
         pageList may be a list of two-tuples (num, page). Otherwise, the pages
@@ -77,7 +87,7 @@ class PrintJob(backgroundjob.Job):
             page.updateSize(page.dpi, page.dpi, 1.0)
             self.pageList.append((pageNum, page))
 
-    def work(self):
+    def work(self) -> bool:
         """Paint the pages to the printer in the background."""
         p = self.printer
         p.setFullPage(True)
@@ -106,10 +116,10 @@ class PrintJob(backgroundjob.Job):
 
 class PrintProgressDialog(QProgressDialog):
     """A simple progress dialog displaying the printing progress."""
-    def __init__(self, job, parent=None):
+    def __init__(self, job: PrintJob, parent: Optional[QWidget] = None):
         """Initializes ourselves with the print job and optional parent widget."""
         super().__init__(parent)
-        self._job = job
+        self._job: PrintJob = job
         job.progress.connect(self.showProgress)
         job.finished.connect(self.jobFinished)
         self.canceled.connect(job.requestInterruption)
@@ -117,22 +127,26 @@ class PrintProgressDialog(QProgressDialog):
         self.setRange(0, len(job.pageList))
         self.setLabelText("Preparing to print...")
 
-    def showProgress(self, page, num, total):
+    def showProgress(self, page: AbstractPage, num: int, total: int) -> None:
         """Called by the job when printing a page."""
         self.setValue(num)
-        self.setLabelText("Printing page {page} ({num} of {total})...".format(
-                page=page, num=num, total=total))
+        self.setLabelText(
+            "Printing page {page} ({num} of {total})...".format(
+                page=page, num=num, total=total
+            )
+        )
 
-    def jobFinished(self):
+    def jobFinished(self) -> None:
         """Called when the print job has finished."""
         if not self._job.result and not self._job.aborted:
             self.showErrorMessage()
         del self._job
         self.deleteLater()
 
-    def showErrorMessage(self):
+    def showErrorMessage(self) -> None:
         """Reimplement to show a different or translated error message."""
-        QMessageBox.warning(self.parent(), "Printing Error",
-                    "Could not send the document to the printer.")
-
-
+        QMessageBox.warning(
+            self.parent(),
+            "Printing Error",
+            "Could not send the document to the printer."
+        )

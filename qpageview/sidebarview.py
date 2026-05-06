@@ -27,8 +27,8 @@ to browse large documents.
 
 """
 
-from PyQt6.QtCore import QEvent, QMargins, QRect, Qt
-from PyQt6.QtGui import QPainter
+from PySide6.QtCore import QEvent, QMargins, QRect, Qt
+from PySide6.QtGui import QPainter
 
 from . import constants
 from . import layout
@@ -55,8 +55,8 @@ class SidebarView(selector.SelectorViewMixin, util.LongMousePressMixin, view.Vie
 
     autoOrientationEnabled = True
 
-    def __init__(self, parent=None, **kwds):
-        super().__init__(parent, **kwds)
+    def __init__(self, parent=None, **kwargs):
+        super().__init__(parent, **kwargs)
         self._view = None
         self.setOrientation(constants.Vertical)
         self.pageLayout().spacing = 1

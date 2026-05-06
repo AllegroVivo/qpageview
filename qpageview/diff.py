@@ -23,28 +23,40 @@
 A Page intended to display the visual difference between other pages.
 
 """
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Sequence, List, Optional, Type
 
 import itertools
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QPainter, QPixmap
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QPainter, QPixmap
 
-from . import multipage
-from . import page
+from .multipage import MultiPage, MultiPageDocument, MultiPageRenderer
+from .page import ImagePrintPageMixin, BlankPage
+
+if TYPE_CHECKING:
+    from .page import AbstractPage
+    from .render import AbstractRenderer
 
 
-class DiffPage(page.ImagePrintPageMixin, multipage.MultiPage):
-    """A Page that shows the difference between sub pages.
+class DiffPage(ImagePrintPageMixin, MultiPage):
+    """A Page that shows the difference between sub-pages.
 
     DiffPage inherits from MultiPage; the pages are to be added in the pages
     attribute. The first page is considered to be the "default" page, shown
     the normal way; the others are added in configurable colors and intensity.
 
     """
-    opaquePages = False
+    opaquePages: bool = False
 
     @classmethod
-    def createPages(cls, pageLists, renderer=None, pad=page.BlankPage):
+    def createPages(
+        cls,
+        pageLists: List[List[AbstractPage]],
+        renderer: Optional[AbstractRenderer] = None,
+        pad: Type[AbstractPage] = BlankPage
+    ):
         """Reimplemented to adapt the page sizes."""
         it = itertools.zip_longest(*pageLists) if pad else zip(*pageLists)
         for pages in it:
@@ -67,35 +79,37 @@ class DiffPage(page.ImagePrintPageMixin, multipage.MultiPage):
             yield page
 
 
-class DiffDocument(multipage.MultiPageDocument):
+class DiffDocument(MultiPageDocument):
     """A Document showing the differences between documents, set as sources."""
     pageClass = DiffPage
 
 
-class DiffRenderer(multipage.MultiPageRenderer):
+class DiffRenderer(MultiPageRenderer):
     """Renders the pages by calling their own renderer.
 
     How the difference is displayed can be configured using this renderer.
     Up to four different pages can be displayed, the colors to render them
     are taken from the colors instance variable, which is a list.
 
-    The alpha channel of each color determines the visiblity of the
-    corresponding sub page.
+    The alpha channel of each color determines the visibility of the
+    corresponding sub-page.
 
     This renderer works best with pages that are mostly black on a white
     background.
 
     """
+
+    # noinspection PyMissingConstructor
     def __init__(self):
         # we don't use a cache so no need to call super init
-        self.colors = [
+        self.colors: List[QColor] = [
             QColor(Qt.GlobalColor.black),
             QColor(Qt.GlobalColor.red),
             QColor(Qt.GlobalColor.green),
             QColor(Qt.GlobalColor.blue),
         ]
 
-    def combine(self, painter, images):
+    def combine(self, painter: QPainter, images: Sequence[QPixmap]) -> None:
         """Paint images on the painter.
 
         We draw bottom-up, using Darken composition mode, so the lower images
@@ -122,9 +136,5 @@ class DiffRenderer(multipage.MultiPageRenderer):
             painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Darken)
 
 
-
 # install a default renderer, so DiffPage can be used directly
 DiffPage.renderer = DiffRenderer()
-
-
-

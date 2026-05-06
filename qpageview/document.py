@@ -42,7 +42,19 @@ are loaded, which normally happens when a Document is shown in a View using
 View.setDocument().
 
 """
+from __future__ import annotations
 
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, TypeVar, List, Dict, Optional
+
+if TYPE_CHECKING:
+    # noinspection PyUnusedImports
+    from .link import Area
+    from .page import AbstractPage
+    from .render import AbstractRenderer
+
+TPage = TypeVar("TPage", bound="AbstractPage")
+URLDict = Dict[str, Dict[int, List["Area"]]]
 
 class Document:
     """A Document represents a group of pages that belong together in some way.
@@ -50,23 +62,23 @@ class Document:
     Add pages on creation or by manipulating the list returned by pages().
 
     """
-    def __init__(self, pages=()):
-        self._pages = []
+    def __init__(self, pages: Sequence[TPage] = ()):
+        self._pages: List[TPage] = []
         self._pages.extend(pages)
 
-    def count(self):
+    def count(self) -> int:
         """Return the number of pages."""
         return len(self.pages())
 
-    def pages(self):
+    def pages(self) -> Sequence[TPage]:
         """Return the list of pages."""
         return self._pages
 
-    def clear(self):
+    def clear(self) -> None:
         """Empties the document."""
         self._pages.clear()
 
-    def filename(self):
+    def filename(self) -> str:
         """Return the filename of the document.
 
         The default implementation returns an empty string.
@@ -74,7 +86,7 @@ class Document:
         """
         return ""
 
-    def filenames(self):
+    def filenames(self) -> List[str]:
         """Return the list of filenames, for multi-file documents.
 
         The default implementation returns an empty list.
@@ -82,7 +94,7 @@ class Document:
         """
         return []
 
-    def urls(self):
+    def urls(self) -> URLDict:
         """Return a dict, mapping URLs (str) to areas on pages.
 
         This method queries the links of all pages, and if they have a URL, the
@@ -102,7 +114,7 @@ class Document:
                     urls.setdefault(url, {}).setdefault(n, []).append(link.area)
         return urls
 
-    def addUrls(self, urls):
+    def addUrls(self, urls: URLDict) -> None:
         """Read the dict (such as returned by urls()) and make clickable links.
 
         This can be used to add url-links to a document from another document,
@@ -126,18 +138,21 @@ class AbstractSourceDocument(Document):
     to trigger a reload.
 
     """
-    def __init__(self, renderer=None):
-        self.renderer = renderer
-        self._pages = None
-        self._urls = None
 
-    def pages(self):
+    # noinspection PyMissingConstructor
+    def __init__(self, renderer: Optional[AbstractRenderer] = None):
+        self.renderer: Optional[AbstractRenderer] = renderer
+        self._pages: Optional[List[AbstractPage]] = None
+        self._urls: Optional[URLDict] = None
+
+    def pages(self) -> List[TPage]:
         """Return the list of Pages, creating them at first call."""
         if self._pages is None:
             self._pages = list(self.createPages())
+        assert self._pages  # for type checker - SP
         return self._pages
 
-    def invalidate(self):
+    def invalidate(self) -> None:
         """Delete all cached pages, except for filename(s) or source object(s).
 
         Also called internally by clear().
@@ -146,11 +161,11 @@ class AbstractSourceDocument(Document):
         self._pages = None
         self._urls = None
 
-    def clear(self):
+    def clear(self) -> None:
         """Delete all cached pages, and clear filename(s) or source object(s)."""
         self.invalidate()
 
-    def createPages(self):
+    def createPages(self) -> Sequence[TPage]:
         """Implement this method to create and yield the pages.
 
         This method is only called once. After altering filename,-s or
@@ -159,65 +174,74 @@ class AbstractSourceDocument(Document):
         """
         return NotImplemented
 
-    def urls(self):
+    def urls(self) -> URLDict:
         """Reimplemented to cache the urls returned by Document.urls()."""
-        if self._urls == None:
+        if self._urls is None:
             self._urls = super().urls()
+        assert self._urls  # for type checker - SP
         return self._urls
 
+TSource = TypeVar("TSource", bound="AbstractSourceDocument")
 
 class SingleSourceDocument(AbstractSourceDocument):
     """A Document that loads its pages from a single file or source."""
-    def __init__(self, source=None, renderer=None):
+    def __init__(
+        self,
+        source: Optional[TSource] = None,
+        renderer: Optional[AbstractRenderer] = None
+    ):
         super().__init__(renderer)
-        self._source = source
+        self._source: Optional[TSource] = source
 
-    def source(self):
+    def source(self) -> Optional[TSource]:
         """Return a data object that might be set for the whole document."""
         return self._source
 
-    def setSource(self, source):
+    def setSource(self, source: TSource) -> None:
         """Set the data object for the whole document. Invalidates the document."""
         self.clear()
         self._source = source
 
-    def filename(self):
+    def filename(self) -> str:
         """Return the file name applying to the whole document."""
         return self._source if isinstance(self._source, str) else ""
 
     setFilename = setSource
 
-    def clear(self):
+    def clear(self) -> None:
         """Delete all cached pages, and clear filename or source object."""
         self.invalidate()
         self._source = None
 
+VSource = TypeVar("VSource", bound="AbstractSourceDocument")
 
 class MultiSourceDocument(AbstractSourceDocument):
     """A Document that loads every page from its own file or source."""
-    def __init__(self, sources=(), renderer=None):
+    def __init__(
+        self,
+        sources: Sequence[VSource] = (),
+        renderer: Optional[AbstractRenderer] = None
+    ):
         super().__init__(renderer)
-        self._sources = []
+        self._sources: List[VSource] = []
         self._sources.extend(sources)
 
-    def sources(self):
+    def sources(self) -> List[VSource]:
         """Return data objects for every page."""
         return self._sources
 
-    def setSources(self, sources):
+    def setSources(self, sources: Sequence[VSource]) -> None:
         """Set data objects for every page. Invalidates the document."""
         self.clear()
         self._sources[:] = sources
 
-    def filenames(self):
+    def filenames(self) -> List[str]:
         """Return the list of file names of every page."""
         return [f if isinstance(f, str) else "" for f in self._sources]
 
     setFilenames = setSources
 
-    def clear(self):
+    def clear(self) -> None:
         """Delete all cached pages, and clear filenames or source objects."""
         self.invalidate()
         self._sources = []
-
-

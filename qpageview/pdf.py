@@ -27,15 +27,14 @@ PDF rendering backend using QtPdf.
 
 import platform
 
-from PyQt6.QtCore import Qt, QByteArray, QModelIndex, QRect, QRectF, QSize, QUrl
-from PyQt6.QtGui import QPainter
-from PyQt6.QtPdf import QPdfDocument, QPdfDocumentRenderOptions
+from PySide6.QtCore import Qt, QByteArray, QCoreApplication, QModelIndex, QRect, QRectF, QSize, QUrl
+from PySide6.QtPdf import QPdfDocument, QPdfDocumentRenderOptions
 
 # Check for PDF link support (added in Qt 6.6)
 # As of 2026, some Linux distros still ship older Qt versions without it.
 # We will attempt to run with point-and-click disabled on such systems.
 try:
-    from PyQt6.QtPdf import QPdfLinkModel
+    from PySide6.QtPdf import QPdfLinkModel
 except ImportError:
     QPdfLinkModel = None
     import sys
@@ -326,7 +325,7 @@ def load(source):
     elif isinstance(source, str) or isinstance(source, QByteArray):
         # We need to create the QPdfDocument without a parent QObject so
         # Python can garbage-collect it properly when it goes out of scope
-        document = QPdfDocument(None)   # parent has no default value
+        document = QPdfDocument(None)  # type: ignore - parent has no default value
         document.load(source)
         return document
 
