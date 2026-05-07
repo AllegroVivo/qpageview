@@ -40,7 +40,7 @@ from PySide6.QtGui import (
     QCursor, QPainter, QPalette, QRegion, QImage, QPaintEvent, QResizeEvent,
     QWheelEvent, QMouseEvent, QKeyEvent
 )
-from PySide6.QtPdf import QPdfDocument
+
 from PySide6.QtWidgets import QGestureEvent, QPinchGesture, QStyle
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
 
@@ -81,7 +81,7 @@ if TYPE_CHECKING:
     from .pdf import PdfFilenameType
 
 
-LayoutMode = Literal["single", "raster", "double_left", "double_right"]
+PageLayoutMode = Literal["single", "raster", "double_left", "double_right"]
 WhatType = Union[Literal["next", "previous", "first", "last"], int]
 
 class Position(NamedTuple):
@@ -207,7 +207,7 @@ class View(ScrollArea):
         self._viewMode = props.viewMode
         self._pageLayout.continuousMode = props.continuousMode
         self._pageLayout.orientation = props.orientation
-        self._pageLayoutMode: LayoutMode = props.pageLayoutMode
+        self._pageLayoutMode: PageLayoutMode = props.pageLayoutMode
         self.pageLayout().engine = self.pageLayoutModes()[props.pageLayoutMode]()
 
     def pageCount(self) -> int:
@@ -314,7 +314,7 @@ class View(ScrollArea):
         return self._pageLayout
 
     @staticmethod
-    def pageLayoutModes() -> Dict[LayoutMode, Callable[[], LayoutEngine]]:
+    def pageLayoutModes() -> Dict[PageLayoutMode, Callable[[], LayoutEngine]]:
         """Return a dictionary mapping names to callables.
 
         The callable returns a configured LayoutEngine that is set to the
@@ -347,7 +347,7 @@ class View(ScrollArea):
         """Return the currently set page layout mode."""
         return self._pageLayoutMode
 
-    def setPageLayoutMode(self, mode: LayoutMode) -> None:
+    def setPageLayoutMode(self, mode: PageLayoutMode) -> None:
         """Set the page layout mode.
 
         The mode is one of the names returned by pageLayoutModes().
@@ -556,7 +556,7 @@ class View(ScrollArea):
             if printer.pageOrder() == QPrinter.PageOrder.LastPageFirst:
                 pageNumbers.reverse()
         # add the page objects
-        pageList = [(n, self.page(n)) for n in pageNumbers]
+        pageList: List = [(n, self.page(n)) for n in pageNumbers]
         from . import printing
         job = printing.PrintJob(printer, pageList)
         job.start()
@@ -994,7 +994,7 @@ class View(ScrollArea):
                 return
             # we might need to switch page set
             # find the rect
-            for p in PageRects(self.pageLayout()).intersecting(*rect.getCoords()):  # TODO - address this squiggle - SP
+            for p in PageRects(self.pageLayout()).intersecting(*rect.getCoords()):  # type: ignore - getCoords returns a tuple of values that we can unpack - SP
                 num = self.pageLayout().index(p)
                 self.displayPageSet(self.pageLayout().pageSet(num))
                 break
@@ -1264,7 +1264,7 @@ class ViewProperties:
     viewMode: ViewMode = FixedScale
     orientation: Orientation = None
     continuousMode: bool = None
-    pageLayoutMode: LayoutMode = None
+    pageLayoutMode: PageLayoutMode = None
 
     def setdefaults(self) -> Self:
         """Set all properties to default values. Also used by View on init."""

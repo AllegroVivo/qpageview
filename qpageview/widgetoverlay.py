@@ -22,16 +22,26 @@
 """
 View mixin class to display QWidgets on top of a Page.
 """
+from __future__ import annotations
 
-import collections
+from typing import TYPE_CHECKING, NamedTuple, Optional, Dict, Union, Iterator
 
-from PySide6.QtCore import QPoint, Qt
+from PySide6.QtCore import QPoint, Qt, QRect
+from PySide6.QtGui import QResizeEvent
+from PySide6.QtWidgets import QWidget
 
 from . import constants
 from . import util
 
+if TYPE_CHECKING:
+    from .page import AbstractPage
 
-OverlayData = collections.namedtuple("OverlayData", "page point rect alignment")
+
+class OverlayData(NamedTuple):
+    page: AbstractPage
+    point: Optional[QPoint]
+    rect: Optional[QRect]
+    alignment: Qt.AlignmentFlag
 
 
 class WidgetOverlayViewMixin:
@@ -49,13 +59,19 @@ class WidgetOverlayViewMixin:
 
     """
 
-    deleteUnusedOverlayWidgets = True
+    deleteUnusedOverlayWidgets: bool = True
 
-    def __init__(self, parent=None):
-        self._widgets = {}
+    def __init__(self, parent: Optional[QWidget] = None):
+        self._widgets: Dict[QWidget, OverlayData] = {}
         super().__init__(parent)
 
-    def addWidget(self, widget, page, where=None, alignment=None):
+    def addWidget(
+        self,
+        widget: QWidget,
+        page: AbstractPage,
+        where: Optional[Union[QPoint, QRect]] = None,
+        alignment: Optional[Qt.AlignmentFlag] = None
+    ):
         """Add widget to be displayed on top of page.
 
         The widget becomes a child of the viewport.
@@ -81,17 +97,17 @@ class WidgetOverlayViewMixin:
         point = None
         if where is not None:
             if isinstance(where, QPoint):
-                point = page.mapFromPage().point(where)
+                point = page.mapFromPage().point(where).toPoint()
             else:
-                rect = page.mapFromPage().rect(where)
+                rect = page.mapFromPage().rect(where).toRect()
         else:
-            rect = page.pageRect()
+            rect = page.pageRect().toRect()
         widget.setParent(self.viewport())
         self._widgets[widget] = OverlayData(page, point, rect, alignment)
         self._updateWidget(widget)
         widget.setVisible(page in set(self.visiblePages()))
 
-    def removeWidget(self, widget):
+    def removeWidget(self, widget: QWidget) -> None:
         """Remove the widget.
 
         The widget is not deleted, but its parent is set to None.
@@ -104,7 +120,7 @@ class WidgetOverlayViewMixin:
         else:
             widget.setParent(None)
 
-    def widgets(self, page=None):
+    def widgets(self, page: Optional[AbstractPage] = None) -> Iterator[QWidget]:
         """Yield all widgets (for the Page if given)."""
         if page:
             for widget, d in self._widgets.items():
@@ -114,10 +130,10 @@ class WidgetOverlayViewMixin:
             for widget in self._widgets:
                 yield widget
 
-    def removeWidgets(self, page=None):
+    def removeWidgets(self, page: Optional[AbstractPage] = None) -> None:
         """Remove all widgets (for the Page if given).
 
-        The widget are not deleted, but their parent is set to None.
+        The widgets are not deleted, but their parent is set to None.
 
         """
         if page:
@@ -129,19 +145,21 @@ class WidgetOverlayViewMixin:
                 widget.setParent(None)
             self._widgets.clear()
 
-    def _updateWidget(self, widget):
+    def _updateWidget(self, widget: QWidget) -> None:
         """Internal. Updates size and position of the specified widget."""
         d = self._widgets[widget]
         pos = self.layoutPosition() + d.page.pos()
         if d.point:
             point = pos + d.page.mapToPage().point(d.point)
             geom = util.alignrect(widget.geometry(), point, d.alignment)
-        else: # d.rect:
+        else:  # d.rect:
+            assert d.rect is not None  # for type checker - SP
             rect = d.page.mapToPage().rect(d.rect)
             geom = rect.translated(pos)
+        assert geom is not None  # for type checker - SP
         widget.setGeometry(geom)
 
-    def _updateWidgets(self):
+    def _updateWidgets(self) -> None:
         """Internal. Updates size and position of the widgets."""
         pages = set(self.visiblePages())
         remove = []
@@ -159,23 +177,22 @@ class WidgetOverlayViewMixin:
             for w in remove:
                 w.deleteLater()
 
-    def updatePageLayout(self, lazy=False):
+    def updatePageLayout(self, lazy: bool = False) -> None:
         """Reimplemented to update the size and position of the widgets."""
         super().updatePageLayout(lazy)
         self._updateWidgets()
 
-    def scrollContentsBy(self, dx, dy):
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
         """Reimplemented to scroll the page widgets along with the layout."""
         super().scrollContentsBy(dx, dy)
         d = QPoint(dx, dy)
         for widget in self._widgets.keys():
             widget.move(widget.pos() + d)
 
-    def resizeEvent(self, ev):
+    def resizeEvent(self, ev: QResizeEvent) -> None:
         """Reimplemented to keep page widgets in the right position."""
         super().resizeEvent(ev)
         # in fixed scale mode, call _updateWidgets(). In other view modes,
         # updatePageLayout() is called which calls _updateWidgets() anyway.
         if self.viewMode() == constants.FixedScale:
             self._updateWidgets()
-
