@@ -22,9 +22,16 @@
 """
 A View mixin class that draws a nice drop shadow around all pages.
 """
+from __future__ import annotations
 
-from PyQt6.QtCore import QPoint, Qt
-from PyQt6.QtGui import QColor, QPainter, QPen
+from typing import TYPE_CHECKING, Union
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor, QPainter, QPen, QPaintEvent
+
+if TYPE_CHECKING:
+    from . import View
+    from .page import AbstractPage
 
 
 class ShadowViewMixin:
@@ -37,7 +44,7 @@ class ShadowViewMixin:
 
     dropShadowEnabled = True
 
-    def paintEvent(self, ev):
+    def paintEvent(self: View, ev: QPaintEvent) -> None:
         if self.dropShadowEnabled:
             width = round(self._pageLayout.spacing / 2.0)
             # make the rect slightly larger, so we "see" shadow of pages that
@@ -48,7 +55,13 @@ class ShadowViewMixin:
                 self.drawDropShadow(page, painter, width)
         super().paintEvent(ev)      # then draw the contents
 
-    def drawDropShadow(self, page, painter, width):
+    # noinspection PyMethodMayBeStatic
+    def drawDropShadow(
+        self,
+        page: AbstractPage,
+        painter: QPainter,
+        width: Union[int, float]
+    ) -> None:
         """Draw a drop shadow of width pixels around the Page.
 
         The painter is already translated to the topleft corner of the Page.
@@ -66,7 +79,3 @@ class ShadowViewMixin:
             pen.setColor(color)
             painter.setPen(pen)
             painter.drawRect(rect.adjusted(-i, -i, i, i))
-
-
-
-

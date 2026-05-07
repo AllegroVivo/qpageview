@@ -26,15 +26,18 @@ Manages locking access (across threads) to any object.
 Use it for example to lock access to Document instances.
 
 """
+from __future__ import annotations
 
-import threading
-import weakref
+from typing import Any
 
-_locks = weakref.WeakKeyDictionary()
-_lock = threading.RLock()
+from threading import RLock
+from weakref import WeakKeyDictionary
+
+_locks: WeakKeyDictionary[Any, RLock] = WeakKeyDictionary()
+_lock: RLock = RLock()
 
 
-def lock(item):
+def lock(item: Any) -> RLock:
     """Return a threading.RLock instance for the given item.
 
     Use:
@@ -47,6 +50,5 @@ def lock(item):
         try:
             return _locks[item]
         except KeyError:
-            res = _locks[item] = threading.RLock()
+            res = _locks[item] = RLock()
         return res
-

@@ -23,38 +23,40 @@
 """
 Manages and positions a group of Page instances.
 """
+from __future__ import annotations
 
-
-import copy
 import itertools
 import math
+from typing import TYPE_CHECKING, Tuple, Optional, Iterator, List
 
-from PyQt6.QtCore import QMargins, QPoint, QPointF, QRect, QSize, Qt
+from PySide6.QtCore import QMargins, QPoint, QRect, Qt, QSize
 
-from . import rectangles
-from . import util
 from .constants import (
     FixedScale,
     FitWidth,
     FitHeight,
-    FitBoth,
-
     Rotate_0,
-    Rotate_90,
-    Rotate_180,
-    Rotate_270,
-
+    Rotation,
+    ViewMode,
     Horizontal,
     Vertical,
+    Orientation,
 )
+from .rectangles import Rectangles
+from .util import Rectangular, align
 
+if TYPE_CHECKING:
+    from .page import AbstractPage
 
-class PageRects(rectangles.Rectangles):
-    def get_coords(self, page):
+Margins = Tuple[int, int, int, int]
+Offset = Tuple[int, float, float]
+
+class PageRects(Rectangles):
+    def get_coords(self, page: AbstractPage) -> Tuple[int, int, int, int]:
         return page.geometry().getCoords()
 
 
-class PageLayout(util.Rectangular, list):
+class PageLayout(Rectangular, list):
     """Manages page.Page instances with a list-like api.
 
     You can iterate over the layout itself, which yields all Page instances.
@@ -92,66 +94,68 @@ class PageLayout(util.Rectangular, list):
     update the layout.
 
     """
+    _m: QMargins
+    engine: LayoutEngine
 
-    _margins = (6, 6, 6, 6)
-    _pageMargins = (0, 0, 0, 0)
-    spacing = 8
-    zoomFactor = 1.0
-    dpiX = 72.0
-    dpiY = 72.0
-    rotation = Rotate_0
-    orientation = Vertical
-    alignment = Qt.AlignmentFlag.AlignCenter
+    _margins: Margins = (6, 6, 6, 6)
+    _pageMargins: Margins = (0, 0, 0, 0)
+    spacing: int = 8
+    zoomFactor: float = 1.0
+    dpiX: float = 72.0
+    dpiY: float = 72.0
+    rotation: Rotation = Rotate_0
+    orientation: Orientation = Vertical
+    alignment: Qt.AlignmentFlag = Qt.AlignmentFlag.AlignCenter
 
-    continuousMode = True
-    currentPageSet = 0  # used in non-continuous mode
+    continuousMode: bool = True
+    currentPageSet: int = 0  # used in non-continuous mode
 
-    _rects = None
+    _rects: Optional[PageRects] = None
 
-    def __bool__(self):
+    def __bool__(self) -> bool:
         """Always return True."""
         return True
 
-    def count(self):
+    def count(self, **kwargs) -> int:
         """Return the number of Page instances."""
         return len(self)
 
-    def empty(self):
+    def empty(self) -> bool:
         """Return True if there are zero pages."""
         return len(self) == 0
 
-    def setMargins(self, margins):
+    def setMargins(self, margins: QMargins) -> None:
         """Sets our margins to a QMargins object."""
         self._m = margins
 
-    def margins(self):
-        """Return our margins as a QMargins object, intialized from _margins"""
+    def margins(self) -> QMargins:
+        """Return our margins as a QMargins object, initialized from _margins"""
         try:
             return self._m
         except AttributeError:
             self._m = QMargins(*self._margins)
             return self._m
 
-    def setPageMargins(self, margins):
+    def setPageMargins(self, margins: QMargins) -> None:
         """Sets our page margins to a QMargins object."""
         self._pm = margins
 
-    def pageMargins(self):
-        """Return our page margins as a QMargins object, intialized from _pageMargins"""
+    def pageMargins(self) -> QMargins:
+        """Return our page margins as a QMargins object, initialized from _pageMargins"""
         try:
             return self._pm
         except AttributeError:
             self._pm = QMargins(*self._pageMargins)
             return self._pm
 
-    def _pageRects(self):
+    def _pageRects(self) -> PageRects:
         """(Internal) Return the PageRects object for quickly finding pages."""
         if self._rects:
             return self._rects
         r = self._rects = PageRects(self.displayPages())
         return r
 
-    def pageAt(self, point):
+    def pageAt(self, point: QPoint) -> Optional[AbstractPage]:
         """Return the page that contains the given QPoint.
 
         If the point is not on any page, None is returned.
@@ -160,16 +164,16 @@ class PageLayout(util.Rectangular, list):
         for page in self._pageRects().at(point.x(), point.y()):
             return page
 
-    def pagesAt(self, rect):
+    def pagesAt(self, rect: QRect) -> Iterator[AbstractPage]:
         """Yield the pages touched by the given QRect.
 
         The pages are in undefined order.
 
         """
-        for page in self._pageRects().intersecting(*rect.getCoords()):
+        for page in self._pageRects().intersecting(*rect.getCoords()):  # type: ignore - getCoords() returns a 4-tuple, which we unpack - SP
             yield page
 
-    def nearestPageAt(self, point):
+    def nearestPageAt(self, point: QPoint) -> Optional[AbstractPage]:
         """Return the page at the shortest distance from the given point.
 
         The returned page does not contain the point. (Use pageAt() for that.)
@@ -178,39 +182,39 @@ class PageLayout(util.Rectangular, list):
         """
         return self._pageRects().nearest(point.x(), point.y())
 
-    def defaultWidth(self, page):
+    def defaultWidth(self, page: AbstractPage) -> float:
         """Return the default width of the page."""
         if (page.rotation + self.rotation) & 1:
             return page.pageHeight * page.scaleY / page.dpi
         else:
             return page.pageWidth * page.scaleX / page.dpi
 
-    def defaultHeight(self, page):
+    def defaultHeight(self, page: AbstractPage) -> float:
         """Return the default height of the page."""
         if (page.rotation + self.rotation) & 1:
             return page.pageWidth * page.scaleX / page.dpi
         else:
             return page.pageHeight * page.scaleY / page.dpi
 
-    def widestPage(self):
+    def widestPage(self) -> Optional[AbstractPage]:
         """Return the page with the largest default width, if any."""
         if self.count():
             return max(self, key=self.defaultWidth)
 
-    def highestPage(self):
+    def highestPage(self) -> Optional[AbstractPage]:
         """Return the page with the largest default height, if any."""
         if self.count():
             return max(self, key=self.defaultHeight)
 
-    def fit(self, size, mode):
+    def fit(self, size: QSize, mode: ViewMode) -> Optional[AbstractPage]:
         """Fits the layout in the given size (QSize) and ViewMode."""
         self.engine.fit(self, size, mode)
 
-    def zoomsToFit(self):
+    def zoomsToFit(self) -> bool:
         """Return True if the layout engine changes the zoomFactor to fit."""
         return self.engine.zoomToFit
 
-    def update(self):
+    def update(self) -> bool:
         """Compute the size of all pages and updates their positions.
         Finally set our own size.
 
@@ -229,13 +233,13 @@ class PageLayout(util.Rectangular, list):
         self.setGeometry(geometry)
         return changed
 
-    def updatePageSizes(self):
+    def updatePageSizes(self) -> None:
         """Compute the correct size of every Page."""
         for page in self:
             page.computedRotation = (page.rotation + self.rotation) & 3
             page.updateSize(self.dpiX, self.dpiY, self.zoomFactor)
 
-    def computeGeometry(self):
+    def computeGeometry(self) -> QRect:
         """Return the total geometry (position and size) of the layout.
 
         In most cases the implementation of this method is sufficient: it
@@ -247,7 +251,7 @@ class PageLayout(util.Rectangular, list):
             r |= page.geometry()
         return r + self.margins() + self.pageMargins()
 
-    def pos2offset(self, pos):
+    def pos2offset(self, pos: QPoint) -> Offset:
         """Return a three-tuple (index, x, y).
 
         The index refers to a page in the layout, or nowhere if -1. The x and y
@@ -268,9 +272,9 @@ class PageLayout(util.Rectangular, list):
             i = -1
         x = pos.x() / w
         y = pos.y() / h
-        return (i, x, y)
+        return i, x, y
 
-    def offset2pos(self, offset):
+    def offset2pos(self, offset: Offset) -> QPoint:
         """Return the pos on the layout for the specified offset.
 
         The offset is a three-tuple like returned by pos2offset().
@@ -288,11 +292,11 @@ class PageLayout(util.Rectangular, list):
             h = page.height
         return pos + QPoint(round(x * w), round(y * h))
 
-    def displayPages(self):
+    def displayPages(self) -> List[AbstractPage]:
         """Return the pages that are to be displayed."""
         return self[self.currentPageSetSlice()]
 
-    def currentPageSetSlice(self):
+    def currentPageSetSlice(self) -> slice:
         """Return a slice object describing the current page set."""
         if not self.continuousMode:
             num = self.currentPageSet
@@ -312,7 +316,7 @@ class PageLayout(util.Rectangular, list):
                 return slice(s, s + length)
         return slice(0, self.count())
 
-    def pageSets(self):
+    def pageSets(self) -> List[Tuple[int, int]]:
         """Return a list of (count, length) tuples.
 
         Every count is the number of page sets of that length. The list is
@@ -321,11 +325,11 @@ class PageLayout(util.Rectangular, list):
         """
         return self.engine.pageSets(self.count())
 
-    def pageSetCount(self):
+    def pageSetCount(self) -> int:
         """Return the number of page sets."""
         return sum(count for count, length in self.pageSets())
 
-    def pageSet(self, index):
+    def pageSet(self, index: int) -> int:
         """Return the page set containing page at index."""
         s = 0   # the index at the start of the last page set
         p = 0   # the page set
@@ -359,18 +363,18 @@ class LayoutEngine:
 
     """
 
-    zoomToFit = True        # True means: engine changes the zoomFactor to fit
-    orientation = None      # None means: use layout orientation
+    zoomToFit: bool = True              # True means: engine changes the zoomFactor to fit
+    orientation: Orientation = None     # None means: use layout orientation
 
-    evenWidths = False
-    evenHeights = False
+    evenWidths: bool = False
+    evenHeights: bool = False
 
-    def grid(self, layout):
+    def grid(self, layout: PageLayout) -> Tuple[int, int, int]:
         """Return a three-tuple (ncols, nrows, prepend).
 
         ncols is the number of columns the layout will contain, nrows the
         number of rows; and prepend if the number of empty positions that the
-        layout wants, when the first row has less pages.
+        layout wants, when the first row has fewer pages.
 
         """
         if layout.orientation == Vertical:
@@ -378,11 +382,17 @@ class LayoutEngine:
         else:
             return layout.count(), 1, 0
 
-    def pages(self, layout, ncols, nrows, prepend=0):
+    def pages(
+        self,
+        layout: PageLayout,
+        ncols: int,
+        nrows: int,
+        prepend: int = 0
+    ) -> Iterator[Tuple[AbstractPage, Tuple[int, int]]]:
         """Yield the layout's pages in a grid: (page, (x, y)).
 
         If prepend > 0, that number of first grid positions will remain unused.
-        This can be used for layouts that have less pages in the first row.
+        This can be used for layouts that have fewer pages in the first row.
 
         """
         if (self.orientation or layout.orientation) == Vertical:
@@ -390,11 +400,17 @@ class LayoutEngine:
         else:
             gen = ((col, row) for row in range(nrows) for col in range(ncols))
         if prepend:
-            for i in itertools.islice(gen, prepend):
-                pass # skip unused positions
+            for _ in itertools.islice(gen, prepend):
+                pass  # skip unused positions
         return zip(layout, gen)
 
-    def dimensions(self, layout, ncols, nrows, prepend=0):
+    def dimensions(
+        self,
+        layout: PageLayout,
+        ncols: int,
+        nrows: int,
+        prepend: int = 0
+    ) -> Tuple[List[int], List[int]]:
         """Return two lists: columnwidths and rowheights.
 
         The width and height are page dimensions, without page margin.
@@ -411,7 +427,7 @@ class LayoutEngine:
             rowheights = [max(rowheights)] * nrows
         return colwidths, rowheights
 
-    def updatePagePositions(self, layout):
+    def updatePagePositions(self, layout: PageLayout) -> None:
         """Performs the positioning of the pages. Don't call on empty layout."""
         ncols, nrows, prepend = self.grid(layout)
         colwidths, rowheights = self.dimensions(layout, ncols, nrows, prepend)
@@ -430,11 +446,11 @@ class LayoutEngine:
             yoff[i] += yoff[i-1] + layout.spacing + pmv
         # and go for positioning!
         for page, (col, row) in self.pages(layout, ncols, nrows, prepend):
-            x, y = util.align(page.width, page.height, colwidths[col], rowheights[row], layout.alignment)
+            x, y = align(page.width, page.height, colwidths[col], rowheights[row], layout.alignment)
             page.x = xoff[col] + x
             page.y = yoff[row] + y
 
-    def fit(self, layout, size, mode):
+    def fit(self, layout: PageLayout, size: QSize, mode: ViewMode) -> None:
         """Called by PageLayout.fit()."""
         if mode and layout.count():
             zoomfactors = []
@@ -444,7 +460,7 @@ class LayoutEngine:
                 zoomfactors.append(self.zoomFitHeight(layout, size.height()))
             layout.zoomFactor = min(zoomfactors)
 
-    def zoomFitWidth(self, layout, width):
+    def zoomFitWidth(self, layout: PageLayout, width: float) -> float:
         """Return the zoom factor this layout would need to fit in the width.
 
         This method is called by fit(). The default implementation returns a
@@ -455,7 +471,7 @@ class LayoutEngine:
         width -= m.left() + m.right() + p.left() + p.right()
         return layout.widestPage().zoomForWidth(width, layout.rotation, layout.dpiX)
 
-    def zoomFitHeight(self, layout, height):
+    def zoomFitHeight(self, layout: PageLayout, height: float) -> float:
         """Return the zoom factor this layout would need to fit in the height.
 
         This method is called by fit(). The default implementation returns a
@@ -466,13 +482,13 @@ class LayoutEngine:
         height -= m.top() + m.bottom() + p.top() + p.bottom()
         return layout.highestPage().zoomForHeight(height, layout.rotation, layout.dpiY)
 
-    def pageSets(self, count):
+    def pageSets(self, count: int) -> List[Tuple[int, int]]:
         """Return a list of (count, length) tuples.
 
         Every count is the number of page sets of that length. When the layout
         is in non-continuous mode, it displays only a single page set at a time.
-        For most layout engines, a page set is just one Page, but for column-
-        based layouts other values make sense.
+        For most layout engines, a page set is just one Page, but for
+        column-based layouts other values make sense.
 
         """
         return [(count, 1)] if count else []
@@ -487,19 +503,19 @@ class RowLayoutEngine(LayoutEngine):
         `pagesFirstRow`   = 1, the number of pages to display in the first row
         `fitAllColumns`   = True, whether "fit width" uses all columns
 
-    In non-continuous mode, this layout engine displayes a row of pages
+    In non-continuous mode, this layout engine displays a row of pages
     together. The `orientation` layout attribute is ignored in this layout
     engine.
 
     """
 
-    pagesPerRow = 2
-    pagesFirstRow = 1
-    fitAllColumns = True
+    pagesPerRow: int = 2
+    pagesFirstRow: int = 1
+    fitAllColumns: bool = True
 
-    orientation = Horizontal    # do not change
+    orientation: Orientation = Horizontal    # do not change
 
-    def pageSets(self, count):
+    def pageSets(self, count: int) -> List[Tuple[int, int]]:
         """Return a list of (count, length) tuples respecting our column settings."""
         result = []
         left = count
@@ -515,17 +531,17 @@ class RowLayoutEngine(LayoutEngine):
                 if left:
                     # merge result entries with same length
                     if result and result[-1][1] == left:
-                        result[-1] == (result[-1][0] + 1, left)
+                        result[-1] = (result[-1][0] + 1, left)
                     else:
                         result.append((1, left))
         return result
 
-    def grid(self, layout):
+    def grid(self, layout: PageLayout) -> Tuple[int, int, int]:
         """Return (ncols, nrows, prepend).
 
         Takes into account the pagesPerRow and pagesFirstRow instance
         variables. If desired, prepends empty positions so the first row
-        contains less pages than the column width.
+        contains fewer pages than the column width.
 
         """
         ncols = self.pagesPerRow
@@ -537,7 +553,7 @@ class RowLayoutEngine(LayoutEngine):
         nrows = math.ceil((layout.count() + prepend) / ncols)
         return ncols, nrows, prepend
 
-    def zoomFitWidth(self, layout, width):
+    def zoomFitWidth(self, layout: PageLayout, width: float) -> float:
         """Reimplemented to respect the fitAllColumns setting."""
         if not self.fitAllColumns or self.pagesPerRow == 1 or layout.count() < 2:
             return super().zoomFitWidth(layout, width)
@@ -555,9 +571,9 @@ class RowLayoutEngine(LayoutEngine):
         widestpages = [max(col, key=layout.defaultWidth) for col in cols]
         totalDefaultWidth = sum(map(layout.defaultWidth, widestpages))
         return min(page.zoomForWidth(
-                     width * layout.defaultWidth(page) // totalDefaultWidth,
-                     layout.rotation, layout.dpiX)
-            for page in widestpages)
+            width * layout.defaultWidth(page) // totalDefaultWidth,
+            layout.rotation, layout.dpiX
+        ) for page in widestpages)
 
 
 class RasterLayoutEngine(LayoutEngine):
@@ -568,17 +584,22 @@ class RasterLayoutEngine(LayoutEngine):
 
     """
     zoomToFit = False
-    _h = 0
-    _w = 0
-    _mode = FixedScale
+    _h: int = 0
+    _w: int = 0
+    _mode: ViewMode = FixedScale
 
-    def fit(self, layout, size, mode):
+    def fit(
+        self,
+        layout: PageLayout,
+        size: QSize,
+        mode: ViewMode
+    ) -> None:
         """Reimplemented."""
         self._h = size.height()
         self._w = size.width()
         self._mode = mode
 
-    def grid(self, layout):
+    def grid(self, layout: PageLayout) -> Tuple[int, int, int]:
         """Return a grid that would fit in the layout."""
         m, p = layout.margins(), layout.pageMargins()
         width = self._w - m.left() - m.right()
@@ -630,4 +651,3 @@ class RasterLayoutEngine(LayoutEngine):
 
 # install a default layout engine at the class level
 PageLayout.engine = LayoutEngine()
-

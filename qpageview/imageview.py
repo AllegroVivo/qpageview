@@ -25,14 +25,17 @@ ImageView, a View optimized for display of one Page, e.g. one image.
 Clicking in the view toggles between FitBoth and NaturalSize.
 
 """
+from __future__ import annotations
 
+from typing import Optional
 
-from PyQt6.QtCore import QMargins, Qt
+from PySide6.QtCore import QMargins, Qt
+from PySide6.QtGui import QImage, QMouseEvent
+from PySide6.QtWidgets import QWidget
 
 from . import constants
 from . import util
-from . import view
-
+from .view import View
 
 class ImageViewMixin:
     """View Mixin with a few customisations for displaying a single page/image.
@@ -45,18 +48,18 @@ class ImageViewMixin:
                 size when FitWidth, -Height, or -Both is active.
 
     """
-    fitNaturalSizeEnabled = True
+    fitNaturalSizeEnabled: bool = True
 
-    def __init__(self, parent=None):
+    def __init__(self: ImageView, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.setViewMode(constants.FitBoth)
         self.pageLayout().setMargins(QMargins(0, 0, 0, 0))
 
-    def setImage(self, image):
+    def setImage(self: ImageView, image: QImage) -> None:
         """Convenience method to display a QImage."""
         self.loadImages([image])
 
-    def toggleZooming(self):
+    def toggleZooming(self: ImageView) -> None:
         """Toggles between FitBoth and natural size."""
         if self.viewMode() == constants.FitBoth:
             self.setViewMode(constants.FixedScale)
@@ -64,7 +67,7 @@ class ImageViewMixin:
         else:
             self.setViewMode(constants.FitBoth)
 
-    def fitPageLayout(self):
+    def fitPageLayout(self: ImageView) -> None:
         """Reimplemented to avoid zooming-to-fit larger than naturalsize."""
         layout = self.pageLayout()
         if self.fitNaturalSizeEnabled and self.viewMode() and layout.count():
@@ -82,20 +85,18 @@ class ImageViewMixin:
         else:
             super().fitPageLayout()
 
-    def mouseReleaseEvent(self, ev):
+    def mouseReleaseEvent(self: ImageView, ev: QMouseEvent) -> None:
         """Reimplemented to toggle between FitBoth and ZoomNaturalSize."""
         if not self.isDragging() and ev.button() == Qt.MouseButton.LeftButton:
             self.toggleZooming()
         super().mouseReleaseEvent(ev)
 
 
-class ImageView(ImageViewMixin, view.View):
+class ImageView(ImageViewMixin, View):
     """A View, optimized for display of one Page, e.g. one image.
 
     Append one Page to the layout, use one of the load* methods to load
     a single page document, or use the setImage() method to display a QImage.
 
     """
-    clickToSetCurrentPageEnabled = False
-
-
+    clickToSetCurrentPageEnabled: bool = False

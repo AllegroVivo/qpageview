@@ -1,7 +1,7 @@
 The qpageview module
 ====================
 
-*qpageview* provides a page based document viewer widget for Qt6/PyQt6.
+*qpageview* provides a page based document viewer widget for Qt6/PySide6.
 
 It has a flexible architecture potentionally supporting many formats.
 Currently, it supports PDF and SVG documents and several image formats.
@@ -10,7 +10,7 @@ Currently, it supports PDF and SVG documents and several image formats.
 
     import qpageview
 
-    from PyQt6.QtWidgets import *
+    from PySide6.QtWidgets import *
     a = QApplication([])
 
     v = qpageview.View()
@@ -47,5 +47,5 @@ Dependencies
 
 * Python 3.7+
 * Qt 6.6+
-* PyQt6
+* PySide6
 * pycups (optionally, needed to print to a local CUPS server)

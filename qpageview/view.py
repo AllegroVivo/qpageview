@@ -22,19 +22,32 @@
 """
 The View, deriving from QAbstractScrollArea.
 """
+from __future__ import annotations
+
+from typing import (
+    TYPE_CHECKING, NamedTuple, Optional, Set, List, Dict, Callable, Literal,
+    Iterator, Iterable, Union, Sequence, Tuple, Self
+)
 
 import collections
-import contextlib
-import weakref
+from contextlib import contextmanager
+from weakref import WeakKeyDictionary
 
-from PyQt6.QtCore import pyqtSignal, QEvent, QPoint, QRect, QSize, Qt
-from PyQt6.QtGui import QCursor, QPainter, QPalette, QRegion
-from PyQt6.QtWidgets import QGestureEvent, QPinchGesture, QStyle
-from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
+from PySide6.QtCore import (
+    Signal, QPoint, QSize, Qt, QByteArray, QSettings, QRect, QMargins, QEvent
+)
+from PySide6.QtGui import (
+    QCursor, QPainter, QPalette, QRegion, QImage, QPaintEvent, QResizeEvent,
+    QWheelEvent, QMouseEvent, QKeyEvent
+)
 
-from . import layout
-from . import page
-from . import scrollarea
+from PySide6.QtWidgets import QGestureEvent, QPinchGesture, QStyle
+from PySide6.QtPrintSupport import QPrinter, QPrintDialog
+
+from .layout import (
+    PageLayout, RasterLayoutEngine, LayoutEngine, RowLayoutEngine, PageRects
+)
+from .scrollarea import ScrollArea
 from . import util
 
 from .constants import (
@@ -44,23 +57,39 @@ from .constants import (
     Rotate_90,
     Rotate_180,
     Rotate_270,
+    Rotation,
 
     # viewModes:
     FixedScale,
     FitWidth,
     FitHeight,
     FitBoth,
+    ViewMode,
 
     # orientation:
     Horizontal,
     Vertical,
+    Orientation,
 )
 
+if TYPE_CHECKING:
+    from .document import Document
+    from .rubberband import Rubberband
+    from .magnifier import Magnifier
+    from .page import AbstractPage
+    from .render import AbstractRenderer
+    from .pdf import PdfFilenameType
 
-Position = collections.namedtuple("Position", "pageNumber x y")
 
+PageLayoutMode = Literal["single", "raster", "double_left", "double_right"]
+WhatType = Union[Literal["next", "previous", "first", "last"], int]
 
-class View(scrollarea.ScrollArea):
+class Position(NamedTuple):
+    pageNumber: int
+    x: float
+    y: float
+
+class View(ScrollArea):
     """View is a generic scrollable widget to display Pages in a layout.
 
     Using setPageLayout() you can set a PageLayout to the View, and you can
@@ -102,91 +131,94 @@ class View(scrollarea.ScrollArea):
 
     """
 
-    MIN_ZOOM = 0.05
-    MAX_ZOOM = 64.0
+    MIN_ZOOM: float = 0.05
+    MAX_ZOOM: float = 64.0
 
     #: whether to enable mouse wheel zooming
-    wheelZoomingEnabled = True
+    wheelZoomingEnabled: bool = True
 
     #: whether to enable kinetic scrolling while paging (setCurrentPageNumber)
-    kineticPagingEnabled = True
+    kineticPagingEnabled: bool = True
 
     #: whether to keep track of current page while scrolling
-    pagingOnScrollEnabled = True
+    pagingOnScrollEnabled: bool = True
 
     #: whether a mouse click in a page makes it the current page
-    clickToSetCurrentPageEnabled = True
+    clickToSetCurrentPageEnabled: bool = True
 
     #: whether PageUp and PageDown call setCurrentPageNumber instead of scroll
-    strictPagingEnabled = False
+    strictPagingEnabled: bool = False
 
     #: can be set to a DocumentPropertyStore object. If set, the object is
     #: used to store certain View settings on a per-document basis.
     #: (This happens in the :meth:`clear` and :meth:`setDocument` methods.)
-    documentPropertyStore = None
+    documentPropertyStore: Optional[DocumentPropertyStore] = None
 
     #: (int) emitted when the total amount of pages has changed
-    pageCountChanged = pyqtSignal(int)
+    pageCountChanged: Signal = Signal(int)
 
     #: (int) emitted when the current page number has changed (starting with 1)
-    currentPageNumberChanged = pyqtSignal(int)
+    currentPageNumberChanged: Signal = Signal(int)
 
     #: (int) emitted when the ``viewMode`` has changed
-    viewModeChanged = pyqtSignal(int)
+    viewModeChanged: Signal = Signal(int)
 
     #: (int) emitted when the ``rotation`` has changed
-    rotationChanged = pyqtSignal(int)
+    rotationChanged: Signal = Signal(int)
 
     #: (int) emitted when the ``orientation`` has changed
-    orientationChanged = pyqtSignal(int)
+    orientationChanged: Signal = Signal(int)
 
     #: (float) emitted when the ``zoomFactor`` has changed
-    zoomFactorChanged = pyqtSignal(float)
+    zoomFactorChanged: Signal = Signal(float)
 
     #: (bool) emitted when the ``continuousMode`` has changed
-    continuousModeChanged = pyqtSignal(bool)
+    continuousModeChanged: Signal = Signal(bool)
 
     #: (str) emitted when the ``pageLayoutMode`` has changed
-    pageLayoutModeChanged = pyqtSignal(str)
+    pageLayoutModeChanged: Signal = Signal(str)
 
     #: emitted whenever the page layout has been updated (redraw/resize)
-    pageLayoutUpdated = pyqtSignal()
+    pageLayoutUpdated: Signal = Signal()
 
-    def __init__(self, parent=None, **kwds):
-        super().__init__(parent, **kwds)
-        self._document = None
-        self._currentPageNumber = 0
-        self._pageCount = 0
-        self._scrollingToPage = 0
-        self._prev_pages_to_paint = set()
-        self._viewMode = FixedScale
-        self._pageLayout = None
-        self._magnifier = None
-        self._rubberband = None
-        self._pinchStartFactor = None
+    def __init__(self, parent=None, **kwargs):
+        super().__init__(parent, **kwargs)
+
+        self._document: Optional[Document] = None
+        self._currentPageNumber: int = 0
+        self._pageCount: int = 0
+        self._scrollingToPage: int = 0
+        self._prev_pages_to_paint: Set = set()  # TODO - typehint
+        self._viewMode: ViewMode = FixedScale
+        self._pageLayout = None  # TODO - typehint
+        self._magnifier: Optional[Magnifier] = None
+        self._rubberband: Optional[Rubberband] = None
+        self._pinchStartFactor = None  # TODO - typehint
+
         self.grabGesture(Qt.GestureType.PinchGesture)
         self.viewport().setBackgroundRole(QPalette.ColorRole.Dark)
         self.verticalScrollBar().setSingleStep(20)
         self.horizontalScrollBar().setSingleStep(20)
         self.setMouseTracking(True)
         self.setMinimumSize(QSize(60, 60))
-        self.setPageLayout(layout.PageLayout())
+        self.setPageLayout(PageLayout())
+
         props = self.properties().setdefaults()
         self._viewMode = props.viewMode
         self._pageLayout.continuousMode = props.continuousMode
         self._pageLayout.orientation = props.orientation
-        self._pageLayoutMode = props.pageLayoutMode
+        self._pageLayoutMode: PageLayoutMode = props.pageLayoutMode
         self.pageLayout().engine = self.pageLayoutModes()[props.pageLayoutMode]()
 
-    def pageCount(self):
+    def pageCount(self) -> int:
         """Return the number of pages in the view."""
         return self._pageCount
 
-    def currentPageNumber(self):
+    def currentPageNumber(self) -> int:
         """Return the current page number in view (starting with 1)."""
         return self._currentPageNumber
 
-    def setCurrentPageNumber(self, num):
+    def setCurrentPageNumber(self, num: int) -> None:
         """Scrolls to the specified page number (starting with 1).
 
         If the page is already in view, the view is not scrolled, otherwise
@@ -203,7 +235,7 @@ class View(scrollarea.ScrollArea):
             if self.isScrolling():
                 self._scrollingToPage = True
 
-    def updateCurrentPageNumber(self, num):
+    def updateCurrentPageNumber(self, num: int) -> None:
         """Set the current page number without scrolling the view."""
         count = self.pageCount()
         n = max(min(count, num), 1 if count else 0)
@@ -211,33 +243,33 @@ class View(scrollarea.ScrollArea):
             self._currentPageNumber = num
             self.currentPageNumberChanged.emit(num)
 
-    def gotoNextPage(self):
+    def gotoNextPage(self) -> None:
         """Convenience method to go to the next page."""
         num = self.currentPageNumber()
         if num < self.pageCount():
             self.setCurrentPageNumber(num + 1)
 
-    def gotoPreviousPage(self):
+    def gotoPreviousPage(self) -> None:
         """Convenience method to go to the previous page."""
         num = self.currentPageNumber()
         if num > 1:
             self.setCurrentPageNumber(num - 1)
 
-    def currentPage(self):
+    def currentPage(self) -> Optional[AbstractPage]:
         """Return the page pointed to by currentPageNumber()."""
         if self._pageCount:
             return self._pageLayout[self._currentPageNumber-1]
 
-    def page(self, num):
+    def page(self, num: int) -> Optional[AbstractPage]:
         """Return the page at the specified number (starting at 1)."""
         if 0 < num <= self._pageCount:
             return self._pageLayout[num-1]
 
-    def pages(self):
+    def pages(self) -> List[AbstractPage]:
         """Return a list of all Pages in the page layout."""
         return list(self._pageLayout)
 
-    def position(self):
+    def position(self) -> Position:
         """Return a three-tuple Position(pageNumber, x, y).
 
         The Position describes where the center of the viewport is on the layout.
@@ -250,7 +282,7 @@ class View(scrollarea.ScrollArea):
         i, x, y = self._pageLayout.pos2offset(pos - self.layoutPosition())
         return Position(i + 1, x, y)
 
-    def setPosition(self, position, allowKinetic=True):
+    def setPosition(self, position: Position, allowKinetic: bool = True) -> None:
         """Centers the view on the spot stored in the specified Position.
 
         If allowKinetic is False, immediately jumps to the position, otherwise
@@ -262,7 +294,7 @@ class View(scrollarea.ScrollArea):
         rect.moveCenter(self._pageLayout.offset2pos((i - 1, x, y)))
         self.ensureVisible(rect, allowKinetic=allowKinetic)
 
-    def setPageLayout(self, layout):
+    def setPageLayout(self, layout: PageLayout) -> None:
         """Set our current PageLayout instance.
 
         The dpiX and dpiY attributes of the layout are set to the physical
@@ -277,26 +309,29 @@ class View(scrollarea.ScrollArea):
         self._pageLayout = layout
         self.updatePageLayout()
 
-    def pageLayout(self):
+    def pageLayout(self) -> PageLayout:
         """Return our current PageLayout instance."""
         return self._pageLayout
 
-    def pageLayoutModes(self):
+    @staticmethod
+    def pageLayoutModes() -> Dict[PageLayoutMode, Callable[[], LayoutEngine]]:
         """Return a dictionary mapping names to callables.
 
         The callable returns a configured LayoutEngine that is set to the
         page layout. You can reimplement this method to returns more layout
         modes, but it is required that the name "single" exists.
 
+        If adding additional functions, make sure to add the function name
+        to the LayoutMode type alias at the top of this file. - SP
         """
         def single():
-            return layout.LayoutEngine()
+            return LayoutEngine()
 
         def raster():
-            return layout.RasterLayoutEngine()
+            return RasterLayoutEngine()
 
         def double_left():
-            engine = layout.RowLayoutEngine()
+            engine = RowLayoutEngine()
             engine.pagesPerRow = 2
             engine.pagesFirstRow = 0
             return engine
@@ -306,13 +341,13 @@ class View(scrollarea.ScrollArea):
             engine.pagesFirstRow = 1
             return engine
 
-        return locals()
+        return locals()  # type: ignore - SP
 
-    def pageLayoutMode(self):
+    def pageLayoutMode(self):  # TODO - typehint
         """Return the currently set page layout mode."""
         return self._pageLayoutMode
 
-    def setPageLayoutMode(self, mode):
+    def setPageLayoutMode(self, mode: PageLayoutMode) -> None:
         """Set the page layout mode.
 
         The mode is one of the names returned by pageLayoutModes().
@@ -339,7 +374,7 @@ class View(scrollarea.ScrollArea):
                 with self.keepCentered():
                     self.fitPageLayout()
 
-    def updatePageLayout(self, lazy=False):
+    def updatePageLayout(self, lazy: bool = False) -> None:
         """Update layout, adjust scrollbars, keep track of page count.
 
         If lazy is set to True, calls lazyUpdate() to update the view.
@@ -359,8 +394,8 @@ class View(scrollarea.ScrollArea):
         self.pageLayoutUpdated.emit()
         self.lazyUpdate() if lazy else self.viewport().update()
 
-    @contextlib.contextmanager
-    def modifyPages(self):
+    @contextmanager
+    def modifyPages(self) -> Iterator[List[AbstractPage]]:
         """Return the list of pages and enter a context to make modifications.
 
         Note that the first page is at index 0.
@@ -379,7 +414,7 @@ class View(scrollarea.ScrollArea):
             lazy &= bool(pages)
             removedpages = set(self._pageLayout) - set(pages)
             if selectedpages & removedpages:
-                self.rubberband().clearSelection() # rubberband'll always be there
+                self.rubberband().clearSelection()  # type: ignore - rubberband will always be there - SP
             self._unschedulePages(removedpages)
             self._pageLayout[:] = pages
             if self._viewMode:
@@ -389,8 +424,8 @@ class View(scrollarea.ScrollArea):
                     lazy = False
             self.updatePageLayout(lazy)
 
-    @contextlib.contextmanager
-    def modifyPage(self, num):
+    @contextmanager
+    def modifyPage(self, num: int) -> Iterator[Optional[AbstractPage]]:
         """Return the page (numbers start with 1) and enter a context.
 
         On exit of the context, the page layout is updated.
@@ -406,7 +441,7 @@ class View(scrollarea.ScrollArea):
         """Convenience method to clear the current layout."""
         self.setPages([])
 
-    def setPages(self, pages):
+    def setPages(self, pages: Iterable[AbstractPage]) -> None:
         """Load the iterable of pages into the View.
 
         Existing pages are removed, and the document is set to None.
@@ -418,7 +453,7 @@ class View(scrollarea.ScrollArea):
         with self.modifyPages() as pgs:
             pgs[:] = pages
 
-    def setDocument(self, document):
+    def setDocument(self, document: Document) -> None:
         """Set the Document to display (see document.Document)."""
         store = self._document is not document and self.documentPropertyStore
         if store and self._document:
@@ -429,18 +464,22 @@ class View(scrollarea.ScrollArea):
         if store:
             (store.get(document) or store.default or self.properties()).set(self)
 
-    def document(self):
+    def document(self) -> Optional[Document]:
         """Return the Document currently displayed (see document.Document)."""
         return self._document
 
-    def reload(self):
+    def reload(self) -> None:
         """If a Document was set, invalidate()s it and then reloads it."""
         if self._document:
             self._document.invalidate()
             with self.modifyPages() as pages:
                 pages[:] = self._document.pages()
 
-    def loadPdf(self, filename, renderer=None):
+    def loadPdf(
+        self,
+        filename: PdfFilenameType,
+        renderer: Optional[AbstractRenderer] = None
+    ) -> None:
         """Convenience method to load the specified PDF file.
 
         The filename can also be a QByteArray or an already loaded
@@ -450,7 +489,11 @@ class View(scrollarea.ScrollArea):
         from . import pdf
         self.setDocument(pdf.PdfDocument(filename, renderer))
 
-    def loadSvgs(self, filenames, renderer=None):
+    def loadSvgs(
+        self,
+        filenames: Sequence[Union[str, QByteArray]],
+        renderer: Optional[AbstractRenderer] = None
+    ) -> None:
         """Convenience method to load the specified list of SVG files.
 
         Each SVG file is loaded in one Page. A filename can also be a
@@ -460,7 +503,11 @@ class View(scrollarea.ScrollArea):
         from . import svg
         self.setDocument(svg.SvgDocument(filenames, renderer))
 
-    def loadImages(self, filenames, renderer=None):
+    def loadImages(
+        self,
+        filenames: Sequence[Union[str, QByteArray, QImage]],
+        renderer: Optional[AbstractRenderer] = None
+    ) -> None:
         """Convenience method to load images from the specified list of files.
 
         Each image is loaded in one Page. A filename can also be a
@@ -470,8 +517,13 @@ class View(scrollarea.ScrollArea):
         from . import image
         self.setDocument(image.ImageDocument(filenames, renderer))
 
-    def print(self, printer=None, pageNumbers=None, showDialog=True):
-        """Print all, or speficied pages to QPrinter printer.
+    def print(
+        self,
+        printer: Optional[QPrinter] = None,
+        pageNumbers: Optional[Sequence[int]] = None,
+        showDialog: bool = True
+    ):
+        """Print all, or specified pages to QPrinter printer.
 
         If given the pageNumbers should be a list containing page numbers
         starting with 1. If showDialog is True, a print dialog is shown, and
@@ -504,18 +556,18 @@ class View(scrollarea.ScrollArea):
             if printer.pageOrder() == QPrinter.PageOrder.LastPageFirst:
                 pageNumbers.reverse()
         # add the page objects
-        pageList = [(n, self.page(n)) for n in pageNumbers]
+        pageList: List = [(n, self.page(n)) for n in pageNumbers]
         from . import printing
         job = printing.PrintJob(printer, pageList)
         job.start()
         return job
 
     @staticmethod
-    def properties():
+    def properties() -> ViewProperties:
         """Return an uninitialized ViewProperties object."""
         return ViewProperties()
 
-    def readProperties(self, settings):
+    def readProperties(self, settings: QSettings) -> None:
         """Read View settings from the QSettings object.
 
         If a documentPropertyStore is set, the settings are also set
@@ -528,7 +580,7 @@ class View(scrollarea.ScrollArea):
         if self.documentPropertyStore:
             self.documentPropertyStore.default = props
 
-    def writeProperties(self, settings):
+    def writeProperties(self, settings: QSettings) -> None:
         """Write the current View settings to the QSettings object.
 
         If a documentPropertyStore is set, the settings are also set
@@ -541,7 +593,7 @@ class View(scrollarea.ScrollArea):
         if self.documentPropertyStore:
             self.documentPropertyStore.default = props
 
-    def setViewMode(self, mode):
+    def setViewMode(self, mode: ViewMode) -> None:
         """Sets the current ViewMode."""
         if mode == self._viewMode:
             return
@@ -554,11 +606,11 @@ class View(scrollarea.ScrollArea):
             self.pageLayout().fit(QSize(), mode)
         self.viewModeChanged.emit(mode)
 
-    def viewMode(self):
+    def viewMode(self) -> ViewMode:
         """Returns the current ViewMode."""
         return self._viewMode
 
-    def setRotation(self, rotation):
+    def setRotation(self, rotation: Rotation) -> None:
         """Set the current rotation."""
         layout = self._pageLayout
         if rotation != layout.rotation:
@@ -567,19 +619,19 @@ class View(scrollarea.ScrollArea):
                 self.fitPageLayout()
             self.rotationChanged.emit(rotation)
 
-    def rotation(self):
+    def rotation(self) -> Rotation:
         """Return the current rotation."""
         return self._pageLayout.rotation
 
-    def rotateLeft(self):
+    def rotateLeft(self) -> None:
         """Rotate the pages 270 degrees."""
         self.setRotation((self.rotation() - 1) & 3)
 
-    def rotateRight(self):
+    def rotateRight(self) -> None:
         """Rotate the pages 90 degrees."""
         self.setRotation((self.rotation() + 1) & 3)
 
-    def setOrientation(self, orientation):
+    def setOrientation(self, orientation: Orientation) -> None:
         """Set the orientation (Horizontal or Vertical)."""
         layout = self._pageLayout
         if orientation != layout.orientation:
@@ -588,11 +640,11 @@ class View(scrollarea.ScrollArea):
                 self.fitPageLayout()
             self.orientationChanged.emit(orientation)
 
-    def orientation(self):
+    def orientation(self) -> Orientation:
         """Return the current orientation (Horizontal or Vertical)."""
         return self._pageLayout.orientation
 
-    def setContinuousMode(self, continuous):
+    def setContinuousMode(self, continuous: bool) -> None:
         """Sets whether the layout should display all pages.
 
         If True, the layout shows all pages. If False, only the page set
@@ -617,11 +669,11 @@ class View(scrollarea.ScrollArea):
                 self.fitPageLayout()
             self.continuousModeChanged.emit(False)
 
-    def continuousMode(self):
+    def continuousMode(self) -> bool:
         """Return True if the layout displays all pages."""
         return self._pageLayout.continuousMode
 
-    def displayPageSet(self, what):
+    def displayPageSet(self, what: WhatType) -> None:
         """Try to display a page set (if the layout is not in continuous mode).
 
         `what` can be:
@@ -643,7 +695,7 @@ class View(scrollarea.ScrollArea):
             sb = "up"   # move to the start
         elif what == "last":
             what = layout.pageSetCount() - 1
-            sb = "down" # move to the end
+            sb = "down"  # move to the end
         elif what == "previous":
             what = layout.currentPageSet - 1
             if what < 0:
@@ -666,7 +718,7 @@ class View(scrollarea.ScrollArea):
             num = s.stop - 1 if sb == "down" else s.start
             self.updateCurrentPageNumber(num + 1)
 
-    def setMagnifier(self, magnifier):
+    def setMagnifier(self, magnifier: Optional[Magnifier]) -> None:
         """Sets the Magnifier to use (or None to disable the magnifier).
 
         The viewport takes ownership of the Magnifier.
@@ -680,11 +732,11 @@ class View(scrollarea.ScrollArea):
             magnifier.setParent(self.viewport())
             self.viewport().installEventFilter(magnifier)
 
-    def magnifier(self):
+    def magnifier(self) -> Optional[Magnifier]:
         """Returns the currently set magnifier."""
         return self._magnifier
 
-    def setRubberband(self, rubberband):
+    def setRubberband(self, rubberband: Optional[Rubberband]) -> None:
         """Sets the Rubberband to use for selections (or None to not use one)."""
         if self._rubberband:
             self.viewport().removeEventFilter(self._rubberband)
@@ -699,12 +751,12 @@ class View(scrollarea.ScrollArea):
             self.zoomFactorChanged.connect(rubberband.slotZoomChanged)
             self.rotationChanged.connect(rubberband.clearSelection)
 
-    def rubberband(self):
+    def rubberband(self) -> Optional[Rubberband]:
         """Return the currently set rubberband."""
         return self._rubberband
 
-    @contextlib.contextmanager
-    def pagingOnScrollDisabled(self):
+    @contextmanager
+    def pagingOnScrollDisabled(self) -> Iterator[None]:
         """During this context a scroll is not tracked to update the current page number."""
         old, self._scrollingToPage = self._scrollingToPage, True
         try:
@@ -712,14 +764,14 @@ class View(scrollarea.ScrollArea):
         finally:
             self._scrollingToPage = old
 
-    def scrollContentsBy(self, dx, dy):
+    def scrollContentsBy(self, dx: int, dy: int) -> None:
         """Reimplemented to move the rubberband and adjust the mouse cursor."""
         if self._rubberband:
             self._rubberband.scrollBy(QPoint(dx, dy))
         if not self.isScrolling() and not self.isDragging():
             # don't adjust the cursor during a kinetic scroll
             pos = self.viewport().mapFromGlobal(QCursor.pos())
-            if pos in self.viewport().rect() and not self.viewport().childAt(pos):
+            if self.viewport().rect().contains(pos) and not self.viewport().childAt(pos):
                 self.adjustCursor(pos)
         self.viewport().update()
 
@@ -728,7 +780,7 @@ class View(scrollarea.ScrollArea):
         # to be updated
         if self.pagingOnScrollEnabled and not self._scrollingToPage and self.pageCount() > 0:
             # do nothing if current page is still fully in view
-            if self.currentPage().geometry() not in self.visibleRect():
+            if not self.visibleRect().contains(self.currentPage().geometry()):
                 # find the page in the center of the view
                 layout = self._pageLayout
                 pos = self.visibleRect().center()
@@ -737,15 +789,15 @@ class View(scrollarea.ScrollArea):
                     num = layout.index(p) + 1
                     self.updateCurrentPageNumber(num)
 
-    def stopScrolling(self):
+    def stopScrolling(self) -> None:
         """Reimplemented to adjust the mouse cursor on scroll stop."""
         super().stopScrolling()
         self._scrollingToPage = False
         pos = self.viewport().mapFromGlobal(QCursor.pos())
-        if pos in self.viewport().rect() and not self.viewport().childAt(pos):
+        if self.viewport().rect().contains(pos) and not self.viewport().childAt(pos):
             self.adjustCursor(pos)
 
-    def fitPageLayout(self):
+    def fitPageLayout(self) -> None:
         """Fit the layout according to the view mode.
 
         Does nothing in FixedScale mode. Prevents scrollbar/resize loops by
@@ -825,8 +877,8 @@ class View(scrollarea.ScrollArea):
             self.zoomFactorChanged.emit(self.zoomFactor())
             self._unschedulePages(layout)
 
-    @contextlib.contextmanager
-    def keepCentered(self, pos=None):
+    @contextmanager
+    def keepCentered(self, pos: Optional[QPoint] = None) -> Iterator[None]:
         """Context manager to keep the same spot centered while changing the layout.
 
         If pos is not given, the viewport's center is used.
@@ -851,7 +903,7 @@ class View(scrollarea.ScrollArea):
         self.verticalScrollBar().setValue(diff.y())
         self.horizontalScrollBar().setValue(diff.x())
 
-    def setZoomFactor(self, factor, pos=None):
+    def setZoomFactor(self, factor: float, pos: Optional[QPoint] = None):
         """Set the zoom factor (1.0 by default).
 
         If pos is given, that position (in viewport coordinates) is kept in the
@@ -867,32 +919,32 @@ class View(scrollarea.ScrollArea):
             self.zoomFactorChanged.emit(factor)
             self._unschedulePages(self._pageLayout)
 
-    def zoomFactor(self):
+    def zoomFactor(self) -> float:
         """Return the page layout's zoom factor."""
         return self._pageLayout.zoomFactor
 
-    def zoomIn(self, pos=None, factor=1.1):
+    def zoomIn(self, pos: Optional[QPoint] = None, factor: float = 1.1) -> None:
         """Zoom in.
 
         If pos is given, it is the position in the viewport to keep centered.
-        Otherwise zooming centers around the viewport center.
+        Otherwise, zooming centers around the viewport center.
 
         """
         self.setZoomFactor(self.zoomFactor() * factor, pos)
 
-    def zoomOut(self, pos=None, factor=1.1):
+    def zoomOut(self, pos: Optional[QPoint] = None, factor: float = 1.1) -> None:
         """Zoom out.
 
         If pos is given, it is the position in the viewport to keep centered.
-        Otherwise zooming centers around the viewport center.
+        Otherwise, zooming centers around the viewport center.
 
         """
         self.setZoomFactor(self.zoomFactor() / factor, pos)
 
-    def zoomNaturalSize(self, pos=None):
+    def zoomNaturalSize(self, pos: Optional[QPoint] = None) -> None:
         """Zoom to the natural pixel size of the current page.
 
-        The natural pixel size zoom factor can be different than 1.0, if the
+        The natural pixel size zoom factor can be different from 1.0, if the
         screen's DPI differs from the current page's DPI.
 
         """
@@ -900,7 +952,7 @@ class View(scrollarea.ScrollArea):
         factor = p.dpi / self.physicalDpiX() if p else 1.0
         self.setZoomFactor(factor, pos)
 
-    def layoutPosition(self):
+    def layoutPosition(self) -> QPoint:
         """Return the position of the PageLayout relative to the viewport.
 
         This is the top-left position of the layout, relative to the
@@ -912,11 +964,11 @@ class View(scrollarea.ScrollArea):
         """
         return self.areaPos() - self._pageLayout.pos()
 
-    def visibleRect(self):
+    def visibleRect(self) -> QRect:
         """Return the QRect of the page layout that is currently visible in the viewport."""
         return self.visibleArea().translated(self._pageLayout.pos())
 
-    def visiblePages(self, rect=None):
+    def visiblePages(self, rect: Optional[QRect] = None) -> List[AbstractPage]:
         """Yield the Page instances that are currently visible.
 
         If rect is not given, the visibleRect() is used.  The pages are sorted
@@ -930,14 +982,19 @@ class View(scrollarea.ScrollArea):
             return overlayrect.width() * overlayrect.height()
         return sorted(self._pageLayout.pagesAt(rect), key=key, reverse=True)
 
-    def ensureVisible(self, rect, margins=None, allowKinetic=True):
+    def ensureVisible(
+        self,
+        rect: QRect,
+        margins: Optional[QMargins] = None,
+        allowKinetic: bool = True
+    ):
         """Ensure rect is visible, switching page set if necessary."""
         if not any(self.pageLayout().pagesAt(rect)):
             if self.continuousMode():
                 return
             # we might need to switch page set
             # find the rect
-            for p in layout.PageRects(self.pageLayout()).intersecting(*rect.getCoords()):
+            for p in PageRects(self.pageLayout()).intersecting(*rect.getCoords()):  # type: ignore - getCoords returns a tuple of values that we can unpack - SP
                 num = self.pageLayout().index(p)
                 self.displayPageSet(self.pageLayout().pageSet(num))
                 break
@@ -946,16 +1003,16 @@ class View(scrollarea.ScrollArea):
         rect = rect.translated(-self._pageLayout.pos())
         super().ensureVisible(rect, margins, allowKinetic)
 
-    def adjustCursor(self, pos):
+    def adjustCursor(self, pos: QPoint) -> None:
         """Sets the correct mouse cursor for the position on the page."""
         pass
 
-    def repaintPage(self, page):
+    def repaintPage(self, page: AbstractPage) -> None:
         """Call this when you want to redraw the specified page."""
         rect = page.geometry().translated(self.layoutPosition())
         self.viewport().update(rect)
 
-    def lazyUpdate(self, page=None):
+    def lazyUpdate(self, page: Optional[AbstractPage] = None) -> None:
         """Lazily repaint page (if visible) or all visible pages.
 
         Defers updating the viewport for a page until all rendering tasks for
@@ -980,7 +1037,7 @@ class View(scrollarea.ScrollArea):
         elif updates:
             viewport.update(sum(updates, QRegion()))
 
-    def rerender(self, page=None):
+    def rerender(self, page: Optional[AbstractPage] = None) -> None:
         """Schedule the specified page or all pages for rerendering.
 
         Call this when you have changed render options or page contents.
@@ -996,7 +1053,7 @@ class View(scrollarea.ScrollArea):
             renderer.invalidate(pages)
         self.lazyUpdate(page)
 
-    def _unschedulePages(self, pages):
+    def _unschedulePages(self, pages: Iterable[AbstractPage]) -> None:
         """(Internal.)
         Unschedule rendering of pages that are pending but not needed anymore.
 
@@ -1012,7 +1069,7 @@ class View(scrollarea.ScrollArea):
         for renderer, pages in unschedule.items():
             renderer.unschedule(pages, self.repaintPage)
 
-    def pagesToPaint(self, rect, painter):
+    def pagesToPaint(self, rect: QRect, painter: QPainter) -> Iterator[Tuple[AbstractPage, QRect]]:
         """Yield (page, rect) to paint in the specified rectangle.
 
         The specified rect is in viewport coordinates, as in the paint event.
@@ -1032,14 +1089,14 @@ class View(scrollarea.ScrollArea):
             yield p, r
             painter.restore()
 
-    def event(self, ev):
+    def event(self, ev: QEvent) -> bool:
         """Reimplemented to get Gesture events."""
         if isinstance(ev, QGestureEvent) and self.handleGestureEvent(ev):
-            ev.accept() # Accepts all gestures in the event
+            ev.accept()  # Accepts all gestures in the event
             return True
         return super().event(ev)
 
-    def handleGestureEvent(self, event):
+    def handleGestureEvent(self, event: QGestureEvent) -> bool:
         """Gesture event handler.
 
         Return False if event is not accepted. Currently only cares about
@@ -1049,10 +1106,10 @@ class View(scrollarea.ScrollArea):
         ## originally contributed by David Rydh, 2017
         pinch = event.gesture(Qt.GestureType.PinchGesture)
         if pinch:
-            return self.pinchGesture(pinch)
+            return self.pinchGesture(pinch)  # type: ignore - pinch will always be a QPinchGesture if not None - SP
         return False
 
-    def pinchGesture(self, gesture):
+    def pinchGesture(self, gesture: QPinchGesture) -> bool:
         """Pinch gesture event handler.
 
         Return False if event is not accepted. Currently only cares about
@@ -1070,8 +1127,10 @@ class View(scrollarea.ScrollArea):
             factor = gesture.property("totalScaleFactor")
             if not self._pinchStartFactor: # Gesture start?
                 self._pinchStartFactor = self.zoomFactor()
-            self.setZoomFactor(self._pinchStartFactor * factor,
-                      self.mapFromGlobal(gesture.hotSpot().toPoint()))
+            self.setZoomFactor(
+                self._pinchStartFactor * factor,
+                self.mapFromGlobal(gesture.hotSpot().toPoint())
+            )
 
         # Gesture finished?
         if gesture.state() in (Qt.GestureState.GestureFinished, Qt.GestureState.GestureCanceled):
@@ -1079,7 +1138,7 @@ class View(scrollarea.ScrollArea):
 
         return True
 
-    def paintEvent(self, ev):
+    def paintEvent(self, ev: QPaintEvent) -> None:
         """Paint the contents of the viewport."""
         painter = QPainter(self.viewport())
         pages_to_paint = set()
@@ -1090,13 +1149,15 @@ class View(scrollarea.ScrollArea):
         # remove pending render jobs for pages that were visible, but are not
         # visible now
         rect = self.visibleRect()
-        pages = set(page
+        pages = set(
+            page
             for page in self._prev_pages_to_paint - pages_to_paint
-                if not rect.intersects(page.geometry()))
+            if not rect.intersects(page.geometry())
+        )
         self._unschedulePages(pages)
         self._prev_pages_to_paint = pages_to_paint
 
-    def resizeEvent(self, ev):
+    def resizeEvent(self, ev: QResizeEvent) -> None:
         """Reimplemented to scale the view if needed and update the scrollbars."""
         if self._viewMode and not self._pageLayout.empty():
             with self.pagingOnScrollDisabled():
@@ -1107,11 +1168,13 @@ class View(scrollarea.ScrollArea):
                 y, ym = vbar.value(), vbar.maximum()
                 self.fitPageLayout()
                 self.updatePageLayout()
-                if xm: hbar.setValue(round(x * hbar.maximum() / xm))
-                if ym: vbar.setValue(round(y * vbar.maximum() / ym))
+                if xm:
+                    hbar.setValue(round(x * hbar.maximum() / xm))
+                if ym:
+                    vbar.setValue(round(y * vbar.maximum() / ym))
         super().resizeEvent(ev)
 
-    def wheelEvent(self, ev):
+    def wheelEvent(self, ev: QWheelEvent) -> None:
         """Reimplemented to support wheel zooming and paging through page sets."""
         if self.wheelZoomingEnabled and ev.angleDelta().y() and ev.modifiers() & Qt.KeyboardModifier.ControlModifier:
             factor = 1.1 ** util.sign(ev.angleDelta().y())
@@ -1129,7 +1192,7 @@ class View(scrollarea.ScrollArea):
         else:
             super().wheelEvent(ev)
 
-    def mousePressEvent(self, ev):
+    def mousePressEvent(self, ev: QMouseEvent) -> None:
         """Implemented to set the clicked page as current, without moving it."""
         if self.clickToSetCurrentPageEnabled:
             page = self._pageLayout.pageAt(ev.position().toPoint() - self.layoutPosition())
@@ -1138,18 +1201,20 @@ class View(scrollarea.ScrollArea):
                 self.updateCurrentPageNumber(num)
         super().mousePressEvent(ev)
 
-    def mouseMoveEvent(self, ev):
+    def mouseMoveEvent(self, ev: QMouseEvent) -> None:
         """Implemented to adjust the mouse cursor depending on the page contents."""
         # no cursor updates when dragging the background is busy, see scrollarea.py.
         if not self.isDragging():
             self.adjustCursor(ev.position().toPoint())
         super().mouseMoveEvent(ev)
 
-    def keyPressEvent(self, ev):
+    def keyPressEvent(self, ev: QKeyEvent) -> None:
         """Reimplemented to go to next or previous page set if possible."""
         # ESC clears the selection, if any.
-        if (ev.key() == Qt.Key.Key_Escape and not ev.modifiers()
-            and self.rubberband() and self.rubberband().hasSelection()):
+        if (
+            ev.key() == Qt.Key.Key_Escape and not ev.modifiers()
+            and self.rubberband() and self.rubberband().hasSelection()
+        ):
             self.rubberband().clearSelection()
             return
 
@@ -1193,29 +1258,30 @@ class ViewProperties:
     subclass.
 
     """
-    position = None
-    rotation = Rotate_0
-    zoomFactor = 1.0
-    viewMode = FixedScale
-    orientation = None
-    continuousMode = None
-    pageLayoutMode = None
+    position: Optional[Position] = None
+    rotation: Rotation = Rotate_0
+    zoomFactor: float = 1.0
+    viewMode: ViewMode = FixedScale
+    orientation: Orientation = None
+    continuousMode: bool = None
+    pageLayoutMode: PageLayoutMode = None
 
-    def setdefaults(self):
+    def setdefaults(self) -> Self:
         """Set all properties to default values. Also used by View on init."""
         self.orientation = Vertical
         self.continuousMode = True
         self.pageLayoutMode = "single"
         return self
 
-    def copy(self):
+    def copy(self) -> ViewProperties:
         """Return a copy or ourselves."""
         cls = type(self)
-        props = cls.__new__(cls)
+        props = cls.__new__(cls)  # type: ignore - SP
         props.__dict__.update(self.__dict__)
         return props
 
-    def names(self):
+    @staticmethod
+    def names() -> Tuple[str, ...]:
         """Return a tuple with all the property names we support."""
         return (
             'position',
@@ -1227,14 +1293,14 @@ class ViewProperties:
             'pageLayoutMode',
         )
 
-    def mask(self, names):
+    def mask(self, names: Sequence[str]) -> Self:
         """Set properties not listed in names to None."""
         for name in self.names():
             if name not in names and getattr(self, name) is not None:
                 setattr(self, name, None)
         return self
 
-    def get(self, view):
+    def get(self, view: View) -> Self:
         """Get the properties of a View."""
         self.position = view.position()
         self.rotation = view.rotation()
@@ -1245,7 +1311,7 @@ class ViewProperties:
         self.pageLayoutMode = view.pageLayoutMode()
         return self
 
-    def set(self, view):
+    def set(self, view: View) -> Self:
         """Set all our properties that are not None to a View."""
         if self.pageLayoutMode is not None:
             view.setPageLayoutMode(self.pageLayoutMode)
@@ -1264,7 +1330,7 @@ class ViewProperties:
             view.setPosition(self.position, False)
         return self
 
-    def save(self, settings):
+    def save(self, settings: QSettings) -> Self:
         """Save the properties that are not None to a QSettings group."""
         if self.pageLayoutMode is not None:
             settings.setValue("pageLayoutMode", self.pageLayoutMode)
@@ -1298,7 +1364,8 @@ class ViewProperties:
             settings.remove("position")
         return self
 
-    def load(self, settings):
+    # noinspection PyTypeChecker
+    def load(self, settings: QSettings) -> Self:
         """Load the properties from a QSettings group."""
         if settings.contains("pageLayoutMode"):
             v = settings.value("pageLayoutMode", "", str)
@@ -1341,13 +1408,13 @@ class DocumentPropertyStore:
 
     """
 
-    default = None
-    mask = None
+    default: Optional[ViewProperties] = None
+    mask: Optional[Sequence[str]] = None
 
     def __init__(self):
-        self._properties = weakref.WeakKeyDictionary()
+        self._properties: WeakKeyDictionary[Document, ViewProperties] = WeakKeyDictionary()
 
-    def get(self, document):
+    def get(self, document: Document) -> Optional[ViewProperties]:
         """Get the View properties stored for the document, if available.
 
         If a ViewProperties instance is stored in the `default` attribute,
@@ -1363,7 +1430,7 @@ class DocumentPropertyStore:
                     props = props.copy().mask(self.mask)
         return props
 
-    def set(self, document, properties):
+    def set(self, document: Document, properties: ViewProperties) -> None:
         """Store the View properties for the document.
 
         If the `mask` attribute is set to a list or tuple of names, only the
@@ -1373,4 +1440,3 @@ class DocumentPropertyStore:
         if self.mask:
             properties.mask(self.mask)
         self._properties[document] = properties
-

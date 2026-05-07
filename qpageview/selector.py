@@ -25,12 +25,22 @@ SelectorViewMixin class, to mixin with View.
 Adds the capability to select or unselect Pages.
 
 """
+from __future__ import annotations
 
-import contextlib
+from typing import TYPE_CHECKING, Optional, Any, Set, List
 
-from PyQt6.QtCore import pyqtSignal, QRect, Qt
-from PyQt6.QtGui import QPainter, QKeySequence
-from PyQt6.QtWidgets import QStyle, QStyleOptionButton
+from contextlib import contextmanager
+
+from PySide6.QtCore import Signal, QRect, Qt
+from PySide6.QtGui import (
+    QPainter, QKeySequence, QPaintEvent, QMouseEvent, QKeyEvent
+)
+from PySide6.QtWidgets import QStyle, QStyleOptionButton, QWidget
+
+
+if TYPE_CHECKING:
+    from .page import AbstractPage
+    from .sidebarview import SidebarView
 
 
 class SelectorViewMixin:
@@ -42,29 +52,28 @@ class SelectorViewMixin:
     Instance variables:
 
     ``userChangeSelectionModeEnabled`` = True
-        whether the user can change the selectionMode (by longpressing a page
+        whether the user can change the selectionMode by long-pressing a page
         to enable selectionMode, and pressing ESC to leave selectionMode. (Be
         sure to mix in the :class:`qpageview.util.LongMousePressMixin` class
         when you want to use the long mouse press event.)
 
     """
-    selectionChanged = pyqtSignal()
-    selectionModeChanged = pyqtSignal(bool)
+    selectionChanged: Signal = Signal()
+    selectionModeChanged: Signal = Signal(bool)
 
-    userChangeSelectionModeEnabled = True
+    userChangeSelectionModeEnabled: bool = True
 
-
-    def __init__(self, parent=None, **kwds):
-        self._selection = set()
-        self._selectionMode = False
+    def __init__(self, parent: Optional[QWidget] = None, **kwds: Any):
+        self._selection: Set[int] = set()
+        self._selectionMode: bool = False
         super().__init__(parent, **kwds)
 
-    def selection(self):
+    def selection(self) -> List[int]:
         """Return the current list of selected page numbers."""
         return sorted(self._selection)
 
-    @contextlib.contextmanager
-    def modifySelection(self):
+    @contextmanager
+    def modifySelection(self: SidebarView):
         """Context manager that allows changing the selection.
 
         Yields a set, and on exit of the context, stores the modifications and
@@ -83,28 +92,28 @@ class SelectorViewMixin:
             if any(self.page(n).geometry() & visible for n in diff):
                 self.viewport().update()
 
-    def updatePageLayout(self, lazy=False):
+    def updatePageLayout(self, lazy: bool = False) -> None:
         """Reimplemented to also check the selection."""
         super().updatePageLayout(lazy)
         self._checkSelection()
 
-    def _checkSelection(self):
+    def _checkSelection(self: SidebarView):
         """Internal; silently remove page numbers from the selection that do not exist (anymore)."""
         count = self.pageCount()
         nums = [n for n in self._selection if n < 1 or n > count]
         self._selection.difference_update(nums)
 
-    def clearSelection(self):
+    def clearSelection(self) -> None:
         """Convenience method to clear the selection."""
         with self.modifySelection() as s:
             s.clear()
 
-    def selectAll(self):
+    def selectAll(self: SidebarView) -> None:
         """Convenience method to select all pages."""
         with self.modifySelection() as s:
             s.update(range(1, self.pageCount() + 1))
 
-    def toggleSelection(self, pageNumber):
+    def toggleSelection(self, pageNumber: int) -> None:
         """Toggles the selected state of page number pageNumber."""
         with self.modifySelection() as s:
             count = len(s)
@@ -112,25 +121,25 @@ class SelectorViewMixin:
             if count == len(s):
                 s.remove(pageNumber)
 
-    def selectionMode(self):
+    def selectionMode(self) -> bool:
         """Return the current selectionMode (True is enabled, False is disabled)."""
         return self._selectionMode
 
-    def setSelectionMode(self, mode):
+    def setSelectionMode(self: SidebarView, mode: bool) -> None:
         """Switch selection mode on or off (True is enabled, False is disabled)."""
         if self._selectionMode != mode:
             self._selectionMode = mode
             self.selectionModeChanged.emit(mode)
-            self.viewport().update() # repaint
+            self.viewport().update()  # repaint
 
-    def paintEvent(self, ev):
+    def paintEvent(self: SidebarView, ev: QPaintEvent) -> None:
         super().paintEvent(ev)      # first draw the contents
         if self._selectionMode:
             painter = QPainter(self.viewport())
             for page, rect in self.pagesToPaint(ev.rect(), painter):
                 self.drawSelection(page, painter)
 
-    def drawSelection(self, page, painter):
+    def drawSelection(self: SidebarView, page: AbstractPage, painter: QPainter) -> None:
         """Draws the state (selected or not) for the page."""
         option = QStyleOptionButton()
         option.initFrom(self)
@@ -147,7 +156,7 @@ class SelectorViewMixin:
         if scale is not None:
             painter.restore()
 
-    def mousePressEvent(self, ev):
+    def mousePressEvent(self: SidebarView, ev: QMouseEvent) -> None:
         """Reimplemented to check if a checkbox was clicked."""
         if self._selectionMode and ev.buttons() == Qt.MouseButton.LeftButton:
             pos = ev.pos() - self.layoutPosition()
@@ -155,7 +164,7 @@ class SelectorViewMixin:
             if page:
                 pageNum = self._pageLayout.index(page) + 1
                 pos -= page.pos()
-                if pos in QRect(0, 0, QStyle.PixelMetric.PM_IndicatorWidth, QStyle.PixelMetric.PM_IndicatorHeight):
+                if QRect(0, 0, QStyle.PixelMetric.PM_IndicatorWidth, QStyle.PixelMetric.PM_IndicatorHeight).contains(pos):
                     # the indicator has been clicked
                     if ev.modifiers() & Qt.KeyboardModifier.ControlModifier:
                         # CTRL toggles selection of page
@@ -176,7 +185,7 @@ class SelectorViewMixin:
                     return
         super().mousePressEvent(ev)
 
-    def keyPressEvent(self, ev):
+    def keyPressEvent(self, ev: QKeyEvent) -> None:
         """Clear the selection and switch off selectionmode with ESC."""
         if self._selectionMode:
             if self.userChangeSelectionModeEnabled and ev.key() == Qt.Key.Key_Escape and not ev.modifiers():
@@ -188,7 +197,7 @@ class SelectorViewMixin:
                 return
         super().keyPressEvent(ev)
 
-    def longMousePressEvent(self, ev):
+    def longMousePressEvent(self, ev: QMouseEvent) -> None:
         """Called on long mouse button press, set selectionMode on if enabled."""
         if self.userChangeSelectionModeEnabled:
             if not self._selectionMode:
@@ -198,5 +207,3 @@ class SelectorViewMixin:
                 self.setSelectionMode(False)
                 return
         super().longMousePressEvent(ev)
-
-

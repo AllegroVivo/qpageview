@@ -23,16 +23,24 @@
 """
 Manages lists of rectangular objects and quickly finds them.
 """
+from __future__ import annotations
 
 import bisect
 import operator
-
+from typing import (
+    Sequence, Any, Optional, Tuple, Dict, List, TypeVar,
+    Callable, Literal, Union, Set, Iterator, cast, Iterable
+)
 
 Left   = 0
 Top    = 1
 Right  = 2
 Bottom = 3
 
+TObject = TypeVar("TObject")
+Coordinates = Tuple[float, float, float, float]  # (x, y, x2, y2)
+RectSide = Union[Literal[0, 1, 2, 3], int]  # (Left, Top, Right, Bottom)
+Test = Tuple[Callable[[RectSide, float], TObject], RectSide, float]
 
 class Rectangles:
     """
@@ -51,19 +59,19 @@ class Rectangles:
     once. x should be < x2 and y should be < y2.
 
     """
-    def __init__(self, objects=None):
+    def __init__(self, objects: Optional[Sequence[TObject]] = None):
         """Initializes the Rectangles object.
 
         objects should, if given, be an iterable of rectangular objects, and
         bulk_add() is called on those objects.
 
         """
-        self._items = {} # maps object to the result of func(object)
-        self._index = {} # maps side to indices, objects (index=coordinate of that side)
+        self._items: Dict[TObject, Coordinates] = {}  # maps object to the result of func(object)
+        self._index: Dict[int, Tuple[List[float], List[TObject]]] = {}  # maps side to indices, objects (index=coordinate of that side)
         if objects:
             self.bulk_add(objects)
 
-    def get_coords(self, obj):
+    def get_coords(self, obj: Any) -> Coordinates:
         """You should implement this method.
 
         The result should be a four-tuple with the coordinates of the rectangle
@@ -71,9 +79,9 @@ class Rectangles:
         x should be < x2 and y should be < y2.
 
         """
-        return (0, 0, 0, 0)
+        return 0, 0, 0, 0
 
-    def add(self, obj):
+    def add(self, obj: TObject) -> None:
         """Adds an object to our list. Keeps the index intact."""
         if obj in self._items:
             return
@@ -83,7 +91,7 @@ class Rectangles:
             indices.insert(i, coords[side])
             objects.insert(i, obj)
 
-    def bulk_add(self, objects):
+    def bulk_add(self, objects: Iterable[TObject]) -> None:
         """Adds many new items to the index using the function given in the constructor.
 
         After this, the index is cleared and recreated on the first search operation.
@@ -92,7 +100,7 @@ class Rectangles:
         self._items.update((obj, self.get_coords(obj)) for obj in objects)
         self._index.clear()
 
-    def remove(self, obj):
+    def remove(self, obj: TObject) -> None:
         """Removes an object from our list. Keeps the index intact."""
         del self._items[obj]
         for indices, objects in self._index.values():
@@ -100,36 +108,39 @@ class Rectangles:
             del objects[i]
             del indices[i]
 
-    def clear(self):
+    def clear(self) -> None:
         """Empties the list of items."""
         self._items.clear()
         self._index.clear()
 
-    def at(self, x, y):
+    def at(self, x: float, y: float) -> Set[TObject]:
         """Returns a set() of objects that are touched by the given point."""
         return self._test(
             (self._smaller, Top, y),
             (self._larger, Bottom, y),
             (self._smaller, Left, x),
-            (self._larger, Right, x))
+            (self._larger, Right, x)
+        )
 
-    def inside(self, left, top, right, bottom):
+    def inside(self, left: float, top: float, right: float, bottom: float) -> Set[TObject]:
         """Returns a set() of objects that are fully in the given rectangle."""
         return self._test(
             (self._larger, Top, top),
             (self._smaller, Bottom, bottom),
             (self._larger, Left, left),
-            (self._smaller, Right, right))
+            (self._smaller, Right, right)
+        )
 
-    def intersecting(self, left, top, right, bottom):
+    def intersecting(self, left: float, top: float, right: float, bottom: float) -> Set[TObject]:
         """Returns a set() of objects intersecting the given rectangle."""
         return self._test(
             (self._smaller, Top, bottom),
             (self._larger, Bottom, top),
             (self._smaller, Left, right),
-            (self._larger, Right, left))
+            (self._larger, Right, left)
+        )
 
-    def width(self, obj):
+    def width(self, obj: TObject) -> float:
         """Return the width of the specified object.
 
         This can be used for sorting a set returned by at(), inside() or
@@ -142,12 +153,12 @@ class Rectangles:
         coords = self._items[obj]
         return coords[Right] - coords[Left]
 
-    def height(self, obj):
+    def height(self, obj: TObject) -> float:
         """Return the height of the specified object. See also width()."""
         coords = self._items[obj]
         return coords[Bottom] - coords[Top]
 
-    def closest(self, obj, side):
+    def closest(self, obj: TObject, side: RectSide) -> Optional[TObject]:
         """Returns the object closest to the given one, going to the given side."""
         coords = self._items[obj]
         pos = coords[side^2]
@@ -173,7 +184,7 @@ class Rectangles:
             result.sort(key=lambda r: r[1])
             return result[0][0]
 
-    def nearest(self, x, y):
+    def nearest(self, x: float, y: float) -> Optional[TObject]:
         """Return the object with the shortest distance to the point x, y.
 
         The point (x, y) is outside the object. Use at() to get objects that
@@ -234,24 +245,25 @@ class Rectangles:
         if result:
             return min(result, key=operator.itemgetter(0))[1]
 
-    def __len__(self):
+    def __len__(self) -> int:
         """Return the number of objects."""
         return len(self._items)
 
-    def __contains__(self, obj):
+    def __contains__(self, obj: TObject) -> bool:
         """Return True if the object is managed by us."""
         return obj in self._items
 
-    def __bool__(self):
+    def __bool__(self) -> bool:
         """Always return True."""
         return True
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[TObject]:
         """Iterate over the objects in undefined order."""
         return iter(self._items)
 
     # private helper methods
-    def _test(self, *tests):
+    @staticmethod
+    def _test(*tests: Test) -> Set[TObject]:
         """Performs tests and returns objects that fulfill all of them.
 
         Every test should be a three tuple(method, side, value).
@@ -268,30 +280,29 @@ class Rectangles:
                     break
         return result
 
-    def _smaller(self, side, value):
+    def _smaller(self, side: RectSide, value: float) -> List[TObject]:
         """Returns objects for side below value."""
         indices, objects = self._sorted(side)
         i = bisect.bisect_right(indices, value)
         return objects[:i]
 
-    def _larger(self, side, value):
+    def _larger(self, side: RectSide, value: float) -> List[TObject]:
         """Returns objects for side above value."""
         indices, objects = self._sorted(side)
         i = bisect.bisect_left(indices, value)
         return objects[i:]
 
-    def _sorted(self, side):
+    def _sorted(self, side: RectSide) -> Tuple[List[float], List[TObject]]:
         """Returns a two-tuple (indices, objects) sorted on index for the given side."""
         try:
             return self._index[side]
         except KeyError:
             if self._items:
-                objects = [(coords[side], obj) for obj, coords in self._items.items()]
-                objects.sort(key=operator.itemgetter(0))
-                result = tuple(map(list, zip(*objects)))
+                pairs = [(coords[side], obj) for obj, coords in self._items.items()]
+                pairs.sort(key=operator.itemgetter(0))
+                res = tuple(map(list, zip(*pairs)))  # type: ignore - SP
+                result = cast(Tuple[List[float], List[TObject]], res)
             else:
                 result = [], []
             self._index[side] = result
             return result
-
-

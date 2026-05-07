@@ -22,23 +22,29 @@
 """
 Constant values.
 """
+from typing import Union, Literal
 
+# TODO: Make these constants into IntEnums, so they can be used in type annotations
+#  and have better error messages when invalid values are used. - SP
 
 # rotation:
 Rotate_0   = 0      #: normal
 Rotate_90  = 1      #: 90° rotated clockwise
 Rotate_180 = 2      #: 180° rotated
-Rotate_270 = 3      #: 270° rotated (90° couter clockwise)
+Rotate_270 = 3      #: 270° rotated (90° counter-clockwise)
 
+Rotation = Union[Literal[0, 1, 2, 3], int]  # For now - SP
 
 # viewModes:
 FixedScale = 0      #: the scale is not adjusted to the widget size
 FitWidth   = 1      #: scale so that the page's width fits in the widget
 FitHeight  = 2      #: scale so that the page's height fits in the widget
-FitBoth    = FitHeight | FitWidth   #: fit the whole page
+FitBoth    = 3      #: fit the whole page (previously FitWidth | FitHeight)
 
+ViewMode = Union[Literal[0, 1, 2, 3], int]  # For now - SP
 
 # orientation:
 Horizontal = 1      #: arrange the pages in horizontal order
 Vertical   = 2      #: arrange the pages in vertical order
 
+Orientation = Union[Literal[1, 2], int]  # For now - SP

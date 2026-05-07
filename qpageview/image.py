@@ -26,26 +26,30 @@ ImagePages are instantiated quite fast. The image is only really loaded on first
 display.
 
 """
+from __future__ import annotations
 
-from PyQt6.QtCore import QPoint, QRect, QSize, Qt
-from PyQt6.QtGui import QImage, QImageIOHandler, QImageReader, QPainter, QTransform
+from typing import TYPE_CHECKING, Optional, Union, Iterator
 
-from . import document
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QIODevice, QRectF
+from PySide6.QtGui import QImage, QImageIOHandler, QImageReader, QTransform, QPainter, QColor
+
+from .document import MultiSourceDocument
 from . import locking
-from . import page
-from . import render
+from .page import AbstractRenderedPage
 
+if TYPE_CHECKING:
+    from .render import AbstractRenderer, Key, Tile
 
 class ImageContainer:
-    """Represent an image, is shared among copies of the "same" Page."""
-    def __init__(self, image):
+    """Represents an image, and is shared among copies of the "same" Page."""
+    def __init__(self, image: QImage):
         """Init with a QImage."""
-        self._image = image
+        self._image: QImage = image
 
-    def size(self):
+    def size(self) -> QSize:
         return self._image.size()
 
-    def image(self, clip=None):
+    def image(self, clip: Optional[QRect] = None) -> QImage:
         if clip is None:
             return self._image
         return self._image.copy(clip)
@@ -53,24 +57,25 @@ class ImageContainer:
 
 class ImageLoader(ImageContainer):
     """Represent an image loaded from a file or IO device."""
-    def __init__(self, source, autoTransform=True):
+    # noinspection PyMissingConstructor
+    def __init__(self, source: Union[str, QIODevice], autoTransform: bool = True):
         """Init with a filename or QIODevice.
 
         If autoTransform is True (the default), EXIF rotation is automatically
         applied when loading the image.
 
         """
-        self._size = None
-        self.source = source
-        self.autoTransform = autoTransform
+        self._size: Optional[QSize] = None
+        self.source: Union[str, QIODevice] = source
+        self.autoTransform: bool = autoTransform
 
-    def _reader(self):
+    def _reader(self) -> QImageReader:
         """Return a QImageReader for the source."""
-        reader = QImageReader(self.source)
+        reader = QImageReader(self.source)  # type: ignore - QImageReader has overloads for both str and QIODevice - SP
         reader.setAutoTransform(self.autoTransform)
         return reader
 
-    def size(self):
+    def size(self) -> QSize:
         """Return the size of the image.
 
         If the image can't be loaded, a null size is returned. The resulting
@@ -83,12 +88,13 @@ class ImageLoader(ImageContainer):
             if reader.canRead():
                 size = reader.size()
                 if size:
-                    if self.autoTransform and reader.transformation() & 4:
+                    if self.autoTransform and reader.transformation() & QImageIOHandler.Transformation.TransformationRotate90:
                         size.transpose()
                     self._size = size
+        assert self._size is not None  # for type checker - SP
         return QSize(self._size)
 
-    def image(self, clip=None):
+    def image(self, clip: Optional[QRect] = None):
         """Load and return the image.
 
         If clip is given, it should be a QRect describing the area to load.
@@ -119,25 +125,29 @@ class ImageLoader(ImageContainer):
             return reader.read()
 
 
-class ImagePage(page.AbstractRenderedPage):
+class ImagePage(AbstractRenderedPage):
     """A Page that displays an image in any file format supported by Qt."""
-    autoTransform = True    # whether to automatically apply exif transformations
+    autoTransform: bool = True    # whether to automatically apply exif transformations
     dpi = 96   # TODO: maybe this can be image dependent.
 
-    def __init__(self, container, renderer=None):
+    def __init__(self, container: ImageContainer, renderer: Optional[AbstractRenderer] = None):
         super().__init__(renderer)
-        self.setPageSize(container.size())
-        self._ic = container
+        self.setPageSize(container.size())  # type: ignore - ImageContainer.size() returns QSize, but setPageSize expects QSizeF - SP
+        self._ic: ImageContainer = container
 
     @classmethod
-    def load(cls, filename, renderer=None):
+    def load(
+        cls,
+        filename: Union[str, QIODevice],
+        renderer: Optional[AbstractRenderer] = None
+    ) -> Iterator[ImagePage]:
         """Load the image and yield one ImagePage instance if loading was successful."""
         loader = ImageLoader(filename, cls.autoTransform)
         if loader.size():
             yield cls(loader, renderer)
 
     @classmethod
-    def fromImage(cls, image, renderer=None):
+    def fromImage(cls, image: QImage, renderer: Optional[AbstractRenderer] = None) -> ImagePage:
         """Instantiate one ImagePage from the supplied QImage.
 
         As the image is kept in memory, it is not advised to instantiate many
@@ -147,7 +157,12 @@ class ImagePage(page.AbstractRenderedPage):
         """
         return cls(ImageContainer(image), renderer)
 
-    def print(self, painter, rect=None, paperColor=None):
+    def print(
+        self,
+        painter: QPainter,
+        rect: Optional[QRectF] = None,
+        paperColor: Optional[QColor] = None
+    ) -> None:
         """Paint a page for printing."""
         if rect is None:
             image = self._ic.image()
@@ -158,7 +173,13 @@ class ImagePage(page.AbstractRenderedPage):
             image = self._ic.image(rect.toRect())
         painter.drawImage(QPoint(0, 0), image)
 
-    def image(self, rect=None, dpiX=None, dpiY=None, paperColor=None):
+    def image(
+        self,
+        rect: Optional[QRectF] = None,
+        dpiX: int = None,
+        dpiY: int = None,
+        paperColor: Optional[QColor] = None
+    ):
         """Return a QImage of the specified rectangle."""
         if rect is None:
             rect = self.rect()
@@ -180,14 +201,14 @@ class ImagePage(page.AbstractRenderedPage):
         source = self.transform().inverted()[0].mapRect(rect)
         return self._ic.image(source).transformed(m, Qt.TransformationMode.SmoothTransformation)
 
-    def group(self):
+    def group(self) -> ImageContainer:
         return self._ic
 
-    def mutex(self):
+    def mutex(self) -> ImageContainer:
         return self._ic
 
 
-class ImageDocument(document.MultiSourceDocument):
+class ImageDocument(MultiSourceDocument):
     """A Document representing a group of images.
 
     A source may be a filename, a QIODevice or a QImage.
@@ -195,7 +216,7 @@ class ImageDocument(document.MultiSourceDocument):
     """
     pageClass = ImagePage
 
-    def createPages(self):
+    def createPages(self) -> Iterator[ImagePage]:
         for s in self.sources():
             if isinstance(s, QImage):
                 if not s.isNull():
@@ -205,8 +226,15 @@ class ImageDocument(document.MultiSourceDocument):
                     yield p
 
 
-class ImageRenderer(render.AbstractRenderer):
-    def draw(self, page, painter, key, tile, paperColor=None):
+class ImageRenderer(AbstractRenderer):
+    def draw(
+        self,
+        page: ImagePage,
+        painter: QPainter,
+        key: Key,
+        tile: Tile,
+        paperColor: Optional[QColor] = None
+    ):
         """Draw the specified tile of the page (coordinates in key) on painter."""
         # determine the part to draw; convert tile to viewbox
         source = self.map(key, page.pageRect()).mapRect(QRect(*tile))
@@ -218,7 +246,5 @@ class ImageRenderer(render.AbstractRenderer):
         painter.drawImage(target, image)
 
 
-
 # install a default renderer, so SvgPage can be used directly
 ImagePage.renderer = ImageRenderer()
-

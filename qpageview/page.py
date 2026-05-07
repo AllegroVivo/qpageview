@@ -23,23 +23,38 @@
 A Page is responsible for drawing a page inside a PageLayout.
 
 """
+from __future__ import annotations
 
-import weakref
+from typing import (
+    TYPE_CHECKING, Optional, Callable, Union, Self, Any, Set, List,
+    Iterator, Iterable
+)
 
-from PyQt6.QtCore import QBuffer, QPointF, QRect, QRectF, QSizeF, Qt
-from PyQt6.QtGui import (
-    QColor, QImage, QPageSize, QPainter, QPdfWriter, QPixmap, QTransform)
-from PyQt6.QtSvg import QSvgGenerator
+from weakref import WeakKeyDictionary
 
-from . import util
-from .constants import Rotate_0
+from PySide6.QtCore import (
+    QRectF, QSizeF, Qt, QIODevice, QPoint, QRect, QByteArray
+)
+from PySide6.QtGui import (
+    QImage, QPageSize, QPainter, QPdfWriter, QPixmap, QTransform,
+    QPaintDevice, QColor
+)
+from PySide6.QtSvg import QSvgGenerator
 
+from .util import Rectangular, rotate, MapToPage, MapFromPage
+from .constants import Rotate_0, Rotation
+
+if TYPE_CHECKING:
+    from .link import Links, Link
+    from .render import AbstractRenderer
+    from .diff import DiffPage
 
 # a cache to store "owned" copies
-_copycache = weakref.WeakKeyDictionary()
+_copycache: WeakKeyDictionary[Any, WeakKeyDictionary["AbstractPage", "AbstractPage"]] = WeakKeyDictionary()
 
+Filename = Union[str, QByteArray]
 
-class AbstractPage(util.Rectangular):
+class AbstractPage(Rectangular):
     """A Page is a rectangle that is positioned in a PageLayout.
 
     A Page represents one page, added to a PageLayout that is displayed in a
@@ -87,20 +102,26 @@ class AbstractPage(util.Rectangular):
     value depending on the page type. E.g. for Svg pages 90 or 96 makes sense.
 
     """
-    renderer = None
-    dpi = 72.0
-    pageWidth = 595.28         # default to A4
-    pageHeight = 841.89
+    renderer: Optional[AbstractRenderer] = None
+    dpi: float = 72.0
+    pageWidth: float = 595.28         # default to A4
+    pageHeight: float = 841.89
 
-    z = 0
-    rotation = Rotate_0
-    computedRotation = Rotate_0
-    scaleX = 1.0
-    scaleY = 1.0
-    paperColor = None
+    z: int = 0
+    rotation: Rotation = Rotate_0
+    computedRotation: Rotation = Rotate_0
+    scaleX: float = 1.0
+    scaleY: float = 1.0
+    paperColor: Optional[QColor] = None
+
+    _links: Links = None
 
     @classmethod
-    def load(cls, filename, renderer=None):
+    def load(
+        cls,
+        filename: Filename,
+        renderer: Optional[AbstractRenderer] = None
+    ) -> Iterator[Self]:
         """Implement this to yield one or more pages by reading the file.
 
         The renderer may be None, and not all page types use a renderer.
@@ -111,13 +132,17 @@ class AbstractPage(util.Rectangular):
         pass
 
     @classmethod
-    def loadFiles(cls, filenames, renderer=None):
+    def loadFiles(
+        cls,
+        filenames: Iterable[Filename],
+        renderer: Optional[AbstractRenderer] = None
+    ) -> Iterator[Self]:
         """Load multiple files, yielding Page instances of this type."""
         for f in filenames:
-            for page in cls.load(f, renderer):
+            for page in cls.load(f, renderer):  # type: ignore - SP
                 yield page
 
-    def copy(self, owner=None, matrix=None):
+    def copy(self, owner: Optional[Any] = None, matrix: Optional[QTransform] = None) -> Self:
         """Return a copy of the page with the same instance attributes.
 
         If owner is specified, the copy is weakly cached for that owner and
@@ -132,52 +157,58 @@ class AbstractPage(util.Rectangular):
             try:
                 page = _copycache[owner][self]
             except KeyError:
-                page = cls.__new__(cls)
-                _copycache.setdefault(owner, weakref.WeakKeyDictionary())[self] = page
+                page = cls.__new__(cls)  # type: ignore
+                _copycache.setdefault(owner, WeakKeyDictionary())[self] = page
             else:
                 page.__dict__.clear()
         else:
-            page = cls.__new__(cls)
+            page = cls.__new__(cls)  # type: ignore
         page.__dict__.update(self.__dict__)
         if matrix:
             page.setGeometry(matrix.mapRect(self.geometry()))
-        return page
+        return page  # type: ignore - this is ultimately Self, but the type checker doesn't know that - SP
 
-    def setPageSize(self, sizef):
+    def setPageSize(self, sizef: QSizeF) -> None:
         """Set our natural page size (QSizeF).
 
         Normally this is done in the constructor, based on the page we need to
         render.
 
-        By default the page size is assumed to be in points, 1/72 of an inch.
+        By default, the page size is assumed to be in points, 1/72 of an inch.
         You can set the `dpi` class variable to use a different unit.
 
         """
         self.pageWidth = sizef.width()
         self.pageHeight = sizef.height()
 
-    def pageSize(self):
+    def pageSize(self) -> QSizeF:
         """Return our natural page size (QSizeF).
 
-        By default the page size is assumed to be in points, 1/72 of an inch.
+        By default, the page size is assumed to be in points, 1/72 of an inch.
         You can set the `dpi` class variable to use a different unit.
 
         """
         return QSizeF(self.pageWidth, self.pageHeight)
 
-    def pageRect(self):
+    def pageRect(self) -> QRectF:
         """Return QRectF(0, 0, pageWidth, pageHeight)."""
         return QRectF(0, 0, self.pageWidth, self.pageHeight)
 
-    def transform(self, width=None, height=None):
+    def transform(
+        self,
+        width: Optional[float] = None,
+        height: Optional[float] = None
+    ) -> QTransform:
         """Return a QTransform, converting an original area to page coordinates.
 
         The `width` and `height` refer to the original (unrotated) width and
         height of the page's contents, and default to pageWidth and pageHeight.
 
         """
-        if width  is None: width  = self.pageWidth
-        if height is None: height = self.pageHeight
+        if width is None:
+            width  = self.pageWidth
+        if height is None:
+            height = self.pageHeight
         t = QTransform()
         t.scale(self.width, self.height)
         t.translate(.5, .5)
@@ -186,7 +217,7 @@ class AbstractPage(util.Rectangular):
         t.scale(1 / width, 1 / height)
         return t
 
-    def defaultSize(self):
+    def defaultSize(self) -> QSizeF:
         """Return the pageSize() scaled and rotated (if needed).
 
         Based on scaleX, scaleY, and computedRotation attributes.
@@ -197,7 +228,12 @@ class AbstractPage(util.Rectangular):
             s.transpose()
         return s
 
-    def updateSize(self, dpiX, dpiY, zoomFactor):
+    def updateSize(
+        self,
+        dpiX: float,
+        dpiY: float,
+        zoomFactor: float
+    ) -> None:
         """Set the width and height attributes of the page.
 
         This size is computed based on the page's natural size, dpi, scale and
@@ -209,7 +245,7 @@ class AbstractPage(util.Rectangular):
         self.width = round(s.width() * dpiX / self.dpi * zoomFactor)
         self.height = round(s.height() * dpiY / self.dpi * zoomFactor)
 
-    def zoomForWidth(self, width, rotation, dpiX):
+    def zoomForWidth(self, width: float, rotation: Rotation, dpiX: float) -> float:
         """Return the zoom we need to display ourselves at the given width."""
         width = max(width, 1)
         if (self.rotation + rotation) & 1:
@@ -218,7 +254,7 @@ class AbstractPage(util.Rectangular):
             w = self.pageWidth / self.scaleX
         return width * self.dpi / dpiX / w
 
-    def zoomForHeight(self, height, rotation, dpiY):
+    def zoomForHeight(self, height: float, rotation: Rotation, dpiY: float) -> float:
         """Return the zoom we need to display ourselves at the given height."""
         height = max(height, 1)
         if (self.rotation + rotation) & 1:
@@ -227,7 +263,12 @@ class AbstractPage(util.Rectangular):
             h = self.pageHeight / self.scaleY
         return height * self.dpi / dpiY / h
 
-    def paint(self, painter, rect, callback=None):
+    def paint(
+        self,
+        painter: QPainter,
+        rect: QRect,
+        callback: Callable[[AbstractPage], None] = None
+    ) -> None:
         """Implement this to paint our Page.
 
         The View calls this method in the paint event. If you can't paint
@@ -238,7 +279,12 @@ class AbstractPage(util.Rectangular):
         """
         pass
 
-    def print(self, painter, rect=None, paperColor=None):
+    def print(
+        self,
+        painter: QPainter,
+        rect: QRectF = None,
+        paperColor: Optional[QColor] = None
+    ) -> None:
         """Implement this to paint a page for printing.
 
         The difference with paint() and image() is that the rect (QRectF)
@@ -251,11 +297,16 @@ class AbstractPage(util.Rectangular):
         """
         pass
 
-    def output(self, device, rect=None, paperColor=None):
+    def output(
+        self,
+        device: QPaintDevice,
+        rect: Optional[QRectF] = None,
+        paperColor: Optional[QColor] = None
+    ) -> bool:
         """Paint specified rectangle (or the whole page) to the paint device.
 
         The page is rotated and scaled, and the resolution of the paint device
-        is used in case pixelbased images need to be generated. But where
+        is used in case pixel-based images need to be generated. But where
         possible, vector painting is used.
 
         This method uses :meth:`print` to do the actual painting to the paint
@@ -266,12 +317,18 @@ class AbstractPage(util.Rectangular):
             rect = self.pageRect()
         painter = QPainter(device)
         painter.scale(device.logicalDpiX() / self.dpi, device.logicalDpiY() / self.dpi)
-        util.rotate(painter, self.computedRotation, rect.width(), rect.height())
+        rotate(painter, self.computedRotation, rect.width(), rect.height())
         painter.scale(self.scaleX, self.scaleY)
         self.print(painter, rect, paperColor)
         return painter.end()
 
-    def image(self, rect=None, dpiX=None, dpiY=None, paperColor=None):
+    def image(
+        self,
+        rect: QRect = None,
+        dpiX: float = None,
+        dpiY: float = None,
+        paperColor: Optional[QColor] = None
+    ) -> QImage:
         """Implement this to return a QImage of the specified rectangle.
 
         The rectangle is relative to our top-left position. dpiX defaults to
@@ -280,7 +337,13 @@ class AbstractPage(util.Rectangular):
         """
         pass
 
-    def pdf(self, filename, rect=None, resolution=72.0, paperColor=None):
+    def pdf(
+        self,
+        filename: str,
+        rect: Optional[QRectF] = None,
+        resolution: float = 72.0,
+        paperColor: Optional[QColor] = None
+    ) -> bool:
         """Create a PDF file for the selected rect or the whole page.
 
         The filename may be a string or a QIODevice object. The rectangle is
@@ -304,12 +367,18 @@ class AbstractPage(util.Rectangular):
 
         layout = pdf.pageLayout()
         layout.setMode(layout.Mode.FullPageMode)
-        layout.setPageSize(QPageSize(targetSize * 72.0 / self.dpi, QPageSize.Unit.Point))
+        layout.setPageSize(QPageSize(targetSize * 72.0 / self.dpi, QPageSize.Unit.Point))  # type: ignore - SP
         pdf.setPageLayout(layout)
         return self.output(pdf, source, paperColor)
 
-    def svg(self, filename, rect=None, resolution=72.0, paperColor=None):
-        """Create a SVG file for the selected rect or the whole page.
+    def svg(
+        self,
+        filename: Union[str, QIODevice],
+        rect: Optional[QRectF] = None,
+        resolution: float = 72.0,
+        paperColor: Optional[QColor] = None
+    ) -> bool:
+        """Create an SVG file for the selected rect or the whole page.
 
         The filename may be a string or a QIODevice object. The rectangle is
         relative to our top-left position. Normally vector graphics are
@@ -324,7 +393,7 @@ class AbstractPage(util.Rectangular):
         h = source.height() * self.scaleY
         if self.computedRotation & 1:
             w, h = h, w
-        targetSize = QSizeF(w, h) * resolution / self.dpi
+        targetSize: QSizeF = QSizeF(w, h) * resolution / self.dpi  # type: ignore - SP
 
         svg = QSvgGenerator()
         if isinstance(filename, str):
@@ -336,7 +405,12 @@ class AbstractPage(util.Rectangular):
         svg.setViewBox(QRectF(0, 0, targetSize.width(), targetSize.height()))
         return self.output(svg, source, paperColor)
 
-    def pixmap(self, rect=None, size=100, paperColor=None):
+    def pixmap(
+        self,
+        rect: Optional[QRect] = None,
+        size: float = 100,
+        paperColor: Optional[QColor] = None
+    ) -> QPixmap:
         """Return a QPixmap, scaled so that width or height doesn't exceed size.
 
         Uses the :meth:`image` method to get the image, and converts that to a
@@ -352,15 +426,16 @@ class AbstractPage(util.Rectangular):
         dpi = size / l * self.dpi
         return QPixmap.fromImage(self.image(rect, dpi, dpi, paperColor))
 
-    def mutex(self):
+    def mutex(self) -> Optional[Any]:
         """Return an object that should be locked when rendering the page.
 
         Page are guaranteed not to be rendered at the same time when they
         return the same mutex object. By default, None is returned.
 
         """
+        pass
 
-    def group(self):
+    def group(self) -> Any:
         """Return the group the page belongs to.
 
         This could be some document structure, so that different Page objects
@@ -378,7 +453,7 @@ class AbstractPage(util.Rectangular):
         """
         return self
 
-    def ident(self):
+    def ident(self) -> Optional[Any]:
         """Return a value that identifies the page within the group returned
         by group().
 
@@ -387,25 +462,33 @@ class AbstractPage(util.Rectangular):
         """
         return None
 
-    def mapToPage(self, width=None, height=None):
+    def mapToPage(
+        self,
+        width: Optional[float] = None,
+        height: Optional[float] = None
+    ) -> MapToPage:
         """Return a MapToPage object, that can map original to Page coordinates.
 
         The `width` and `height` refer to the original (unrotated) width and
         height of the page's contents, and default to pageWidth and pageHeight.
 
         """
-        return util.MapToPage(self.transform(width, height))
+        return MapToPage(self.transform(width, height))
 
-    def mapFromPage(self, width=None, height=None):
+    def mapFromPage(
+        self,
+        width: Optional[float] = None,
+        height: Optional[float] = None
+    ) -> MapFromPage:
         """Return a MapFromPage object, that can map Page to original coordinates.
 
         The `width` and `height` refer to the original (unrotated) width and
         height of the page's contents, and default to pageWidth and pageHeight.
 
         """
-        return util.MapFromPage(self.transform(width, height).inverted()[0])
+        return MapFromPage(self.transform(width, height).inverted()[0])
 
-    def text(self, rect):
+    def text(self, rect: QRect) -> str:
         """Implement this method to get the text at the specified rectangle.
 
         The rectangle should be in page coordinates. The default implementation
@@ -414,12 +497,13 @@ class AbstractPage(util.Rectangular):
         """
         return ""
 
-    def getLinks(self):
+    # noinspection PyMethodMayBeStatic
+    def getLinks(self) -> Links:
         """Implement this method to load our links."""
         from . import link
         return link.Links()
 
-    def links(self):
+    def links(self) -> Links:
         """Return the Links object, containing Link objects.
 
         Every Link denotes a clickable area on a Page, in coordinates 0.0-1.0.
@@ -434,7 +518,7 @@ class AbstractPage(util.Rectangular):
             links = self._links = self.getLinks()
         return links
 
-    def linksAt(self, point):
+    def linksAt(self, point: QPoint) -> List[Link]:
         """Return a list of zero or more links touched by QPoint point.
 
         The point is in page coordinates.
@@ -447,7 +531,7 @@ class AbstractPage(util.Rectangular):
         links = self.links()
         return sorted(links.at(pos.x(), pos.y()), key=links.width)
 
-    def linksIn(self, rect):
+    def linksIn(self, rect: QRect) -> Set[Link]:
         """Return an unordered set of links enclosed in rectangle.
 
         The rectangle is in page coordinates.
@@ -455,7 +539,7 @@ class AbstractPage(util.Rectangular):
         """
         return self.links().inside(*self.mapFromPage(1, 1).rect(rect).getCoords())
 
-    def linkRect(self, link):
+    def linkRect(self, link: Link) -> QRectF:
         """Return a QRect encompassing the linkArea of a link in coordinates of our page."""
         return self.mapToPage(1, 1).rect(link.rect())
 
@@ -466,11 +550,18 @@ class AbstractRenderedPage(AbstractPage):
     The renderer lives in the renderer attribute.
 
     """
-    def __init__(self, renderer=None):
+    renderer: AbstractRenderer
+
+    def __init__(self, renderer: Optional[AbstractRenderer] = None):
         if renderer is not None:
             self.renderer = renderer
 
-    def paint(self, painter, rect, callback=None):
+    def paint(
+        self,
+        painter: QPainter,
+        rect: QRectF,
+        callback: Callable[[AbstractPage], None] = None
+    ) -> None:
         """Reimplement this to paint our Page.
 
         The View calls this method in the paint event. If you can't paint
@@ -485,7 +576,12 @@ class AbstractRenderedPage(AbstractPage):
         if rect:
             self.renderer.paint(self, painter, rect, callback)
 
-    def print(self, painter, rect=None, paperColor=None):
+    def print(
+        self,
+        painter: QPainter,
+        rect: QRectF = None,
+        paperColor: Optional[QColor] = None
+    ) -> None:
         """Paint a page for printing.
 
         The difference with :meth:`paint` and :meth:`image` is that the rect
@@ -501,12 +597,19 @@ class AbstractRenderedPage(AbstractPage):
             rect = self.pageRect()
         else:
             rect = rect & self.pageRect()
-        from . import render
-        k = render.Key(self.group(), self.ident(), 0, self.pageWidth, self.pageHeight)
-        t = render.Tile(*rect.normalized().getRect())
+        from .render import Key, Tile
+        k = Key(self.group(), self.ident(), 0, int(self.pageWidth), int(self.pageHeight))
+        r: QRect = rect.normalized().getRect()  # type: ignore - SP
+        t = Tile(r.x(), r.y(), r.width(), r.height())
         self.renderer.draw(self, painter, k, t, paperColor)
 
-    def image(self, rect=None, dpiX=None, dpiY=None, paperColor=None):
+    def image(
+        self,
+        rect: QRectF = None,
+        dpiX: float = None,
+        dpiY: float = None,
+        paperColor: Optional[QColor] = None
+    ) -> QImage:
         """Returns a QImage of the specified rectangle.
 
         The rectangle is relative to our top-left position. dpiX defaults to
@@ -525,11 +628,21 @@ class AbstractRenderedPage(AbstractPage):
 
 class BlankPage(AbstractPage):
     """A blank page."""
-    def paint(self, painter, rect, callback=None):
+    def paint(
+        self,
+        painter: QPainter,
+        rect: QRectF,
+        callback: Callable[[AbstractPage], None] = None
+    ) -> None:
         """Paint blank page in the View."""
         painter.fillRect(rect, self.paperColor or Qt.GlobalColor.white)
 
-    def print(self, painter, rect=None, paperColor=None):
+    def print(
+        self,
+        painter: QPainter,
+        rect: QRectF = None,
+        paperColor: Optional[QColor] = None
+    ) -> None:
         """Paint blank page for printing."""
         if rect is None:
             rect = self.pageRect()
@@ -537,7 +650,13 @@ class BlankPage(AbstractPage):
             rect = rect & self.pageRect()
         painter.fillRect(rect, paperColor or Qt.GlobalColor.white)
 
-    def image(self, rect=None, dpiX=None, dpiY=None, paperColor=None):
+    def image(
+        self,
+        rect: QRectF = None,
+        dpiX: float = None,
+        dpiY: float = None,
+        paperColor: Optional[QColor] = None
+    ) -> QImage:
         """Return a blank image."""
         if rect is None:
             rect = self.rect()
@@ -548,7 +667,7 @@ class BlankPage(AbstractPage):
         s = self.defaultSize()
         width = s.width() * dpiX / self.dpi
         height = s.height() * dpiY / self.dpi
-        image = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
+        image = QImage(int(width), int(height), QImage.Format.Format_ARGB32_Premultiplied)
         image.fill(paperColor or Qt.GlobalColor.white)
         return image
 
@@ -557,10 +676,16 @@ class ImagePrintPageMixin:
     """A Page mixin that implements print() using the image() method.
 
     This can be used e.g. for compositing pages, which does not work well
-    when painting to a PDF, a printer or a SVG generator.
+    when painting to a PDF, a printer or an SVG generator.
 
     """
-    def print(self, painter, rect=None, paperColor=None):
+
+    def print(
+        self: DiffPage,
+        painter: QPainter,
+        rect: QRectF = None,
+        paperColor: Optional[QColor] = None
+    ) -> None:
         """Print using the image() method."""
         if rect is None:
             rect = self.pageRect()
@@ -574,7 +699,7 @@ class ImagePrintPageMixin:
         w, h = r.width(), r.height()
         if m.m11() == 0:
             w, h = h, w     # swap if rotation & 1  :-)
-        # now we know the scale from our dpi to the paintdevice's logicalDpi!
+        # now we know the scale from our dpi to the paint device's logicalDpi!
         hscale = w / rect.width()
         vscale = h / rect.height()
         dpiX = self.dpi * hscale
@@ -582,5 +707,3 @@ class ImagePrintPageMixin:
         image = self.image(target, dpiX, dpiY, paperColor)
         painter.translate(-rect.topLeft())
         painter.drawImage(rect, image)
-
-

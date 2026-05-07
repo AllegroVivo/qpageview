@@ -68,35 +68,52 @@ you can read the `status` and `error` attributes::
 To print a list of files in one job, use `printFiles()`.
 
 """
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Optional, Sequence, Dict, Any, NamedTuple
 
 import os
 import shutil
 import subprocess
 
-from PyQt6.QtGui import QPageSize
-from PyQt6.QtPrintSupport import QPrintEngine, QPrinter
+from PySide6.QtGui import QPageSize, QPageLayout
+from PySide6.QtPrintSupport import QPrintEngine, QPrinter
 
+try:
+    import cups
+    CupsConnection = cups.Connection
+except ImportError:
+    CupsConnection = Any
+
+
+if TYPE_CHECKING:
+    pass
+
+class PrintResult(NamedTuple):
+    status: int
+    error: str
 
 class Handle:
     """Shared implementation of a handle that can send documents to a printer."""
-    def __init__(self, printer=None):
-        self._printer = printer
+    def __init__(self, printer: Optional[QPrinter] = None):
+        self._printer: Optional[QPrinter] = printer
 
-    def setPrinter(self, printer):
+    def setPrinter(self, printer: Optional[QPrinter]) -> None:
         """Use the specified QPrinter."""
         self._printer = printer
 
-    def printer(self):
+    def printer(self) -> QPrinter:
         """Return the QPrinter given on init, or a new default QPrinter instance."""
-        if self._printer == None:
+        if self._printer is None:
             self._printer = QPrinter()
-        return self._printer
+        return self._printer  # type: ignore - printer is set to a QPrinter instance in the line above, if it was None - SP
 
-    def options(self):
+    def options(self) -> Dict[Any, Any]:
         """Return the dict of CUPS options read from the printer object."""
         return options(self.printer())
 
-    def title(self, filenames):
+    @staticmethod
+    def title(filenames: Sequence[str]) -> str:
         """Return a sensible job title based on the list of filenames.
 
         This method is called when the user did not specify a job title.
@@ -109,11 +126,21 @@ class Handle:
             titles.append("(+{0} more)".format(more))
         return ", ".join(titles)
 
-    def printFile(self, filename, title=None, options=None):
+    def printFile(
+        self,
+        filename: str,
+        title: Optional[str] = None,
+        options: Optional[Dict[Any, Any]] = None
+    ):
         """Print the file."""
         return self.printFiles([filename], title, options)
 
-    def printFiles(self, filenames, title=None, options=None):
+    def printFiles(
+        self,
+        filenames: Sequence[str],
+        title: Optional[str] = None,
+        options: Optional[Dict[Any, Any]] = None
+    ):
         """Print a list of files.
 
         If the title is None, the basename of the filename is used. Options may
@@ -140,7 +167,13 @@ class Handle:
             self.status, self.error = 2, "No filenames specified"
         return self.status == 0
 
-    def _doPrintFiles(self, printerName, filenames, title, options):
+    def _doPrintFiles(
+        self,
+        printerName: str,
+        filenames: Sequence[str],
+        title: str,
+        options: Dict[Any, Any]
+    ) -> PrintResult:
         """Implement this to perform the printing.
 
         Should return a tuple (status, error). If status is 0, the operation is
@@ -148,26 +181,47 @@ class Handle:
         failed, and the `error` message should contain some more information.
 
         """
-        return 0, ""
+        return PrintResult(0, "")
 
 
 class CmdHandle(Handle):
     """Print a document using the `lp` shell command."""
-    def __init__(self, command, server="", port=0, user="", printer=None):
-        self._command = command
-        self._server = server
-        self._port = port
-        self._user = user
+    def __init__(
+        self,
+        command: str,
+        server: str = "",
+        port: int = 0,
+        user: str = "",
+        printer: Optional[QPrinter] = None
+    ):
+        self._command: str = command
+        self._server: str = server
+        self._port: int = port
+        self._user: str = user
         super().__init__(printer)
 
     @classmethod
-    def create(cls, printer=None, server="", port=0, user="", cmd="lp"):
+    def create(
+        cls,
+        printer: Optional[QPrinter] = None,
+        server: str = "",
+        port: int = 0,
+        user: str = "",
+        cmd: str = "lp"
+    ) -> Optional[CmdHandle]:
         """Create a handle to print using a shell command, if available."""
+        # noinspection PyDeprecation
         cmd = shutil.which(cmd)
         if cmd:
             return cls(cmd, server, port, user, printer)
 
-    def _doPrintFiles(self, printerName, filenames, title, options):
+    def _doPrintFiles(
+        self,
+        printerName: str,
+        filenames: Sequence[str],
+        title: str,
+        options: Dict[Any, Any]
+    ) -> PrintResult:
         """Print filenames using the `lp` shell command."""
         cmd = [self._command]
         if self._server:
@@ -188,19 +242,25 @@ class CmdHandle(Handle):
         try:
             p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stderr=subprocess.PIPE)
         except OSError as e:
-            return e.errno, e.strerror
+            return PrintResult(e.errno, e.strerror)  # type: ignore - OSError will have errno and strerror attributes in this case - SP
         message = p.communicate()[1].decode('UTF-8', 'replace')
-        return p.wait(), message
+        return PrintResult(p.wait(), message)
 
 
 class IppHandle(Handle):
     """Print a document using a connection to the CUPS server."""
-    def __init__(self, connection, printer=None):
+    def __init__(self, connection: CupsConnection, printer: Optional[QPrinter] = None):
         super().__init__(printer)
-        self._connection = connection
+        self._connection: CupsConnection = connection
 
     @classmethod
-    def create(cls, printer=None, server="", port=0, user=""):
+    def create(
+        cls,
+        printer: Optional[QPrinter] = None,
+        server: str = "",
+        port: int = 0,
+        user: str = ""
+    ) -> Optional[IppHandle]:
         """Return a handle to print using a connection to the (local) CUPS server, if available."""
         try:
             import cups
@@ -217,35 +277,49 @@ class IppHandle(Handle):
         if h.printer().printerName() in c.getPrinters():
             return h
 
-    def _doPrintFiles(self, printerName, filenames, title, options):
+    def _doPrintFiles(
+        self,
+        printerName: str,
+        filenames: Sequence[str],
+        title: str,
+        options: Dict[Any, Any]
+    ) -> PrintResult:
         """Print filenames using a connection to the CUPS server."""
+        # noinspection PyUnresolvedReferences
         import cups
         # cups.Connection.printFiles() behaves flaky: version 1.9.74 can
         # silently fail (without returning an error), and after having fixed
         # that, there are strange error messages on some options.
-        # Therefore we use cups.printFile() for every file.
+        # Therefore, we use cups.printFile() for every file.
         for filename in filenames:
             try:
                 self._connection.printFile(printerName, filename, title, options)
             except cups.IPPError as err:
-                return err.args
-        return 0, ""
+                return PrintResult(*err.args)
+        return PrintResult(0, "")
 
 
-def handle(printer=None, server="", port=0, user=""):
+def handle(
+    printer: Optional[QPrinter] = None,
+    server: str = "",
+    port: int = 0,
+    user: str = ""
+) -> Optional[Handle]:
     """Return the first available handle to print a document to a CUPS server."""
-    return (IppHandle.create(printer, server, port, user) or
-            CmdHandle.create(printer, server, port, user))
+    return (
+        IppHandle.create(printer, server, port, user)
+        or CmdHandle.create(printer, server, port, user)
+    )
 
 
-def options(printer):
+def options(printer: QPrinter) -> Dict[str, str]:
     """Return the dict of CUPS options read from the QPrinter object."""
     o = {}
 
     # cups options that can be set in QPrintDialog on unix
     # I found this in qt5/qtbase/src/printsupport/kernel/qcups.cpp.
     # Esp. options like page-set even/odd do make sense.
-    props = printer.printEngine().property(0xfe00)
+    props = printer.printEngine().property(0xfe00)  # type: ignore - SP
     if props and isinstance(props, list) and len(props) % 2 == 0:
         for key, value in zip(props[0::2], props[1::2]):
             if value and isinstance(key, str) and isinstance(value, str):
@@ -265,8 +339,9 @@ def options(printer):
 
     # media size
     media = []
-    size = printer.paperSize()
-    if size == QPrinter.ZoomMode.Custom:
+    layout = printer.pageLayout()
+    size = layout.pageSize().id()
+    if size == QPageSize.PageSizeId.Custom:
         media.append('Custom.{0}x{1}mm'.format(printer.heightMM(), printer.widthMM()))
     elif size in PAGE_SIZES:
         media.append(PAGE_SIZES[size])
@@ -281,25 +356,25 @@ def options(printer):
 
     # page margins
     if printer.printEngine().property(QPrintEngine.PrintEnginePropertyKey.PPK_PageMargins):
-        left, top, right, bottom = printer.getPageMargins(QPrinter.Unit.Point)
-        o['page-left'] = format(left)
-        o['page-top'] = format(top)
-        o['page-right'] = format(right)
-        o['page-bottom'] = format(bottom)
+        margins = layout.margins(QPrinter.Unit.Point)
+        o['page-left'] = format(margins.left())
+        o['page-top'] = format(margins.top())
+        o['page-right'] = format(margins.right())
+        o['page-bottom'] = format(margins.bottom())
 
     # orientation
-    landscape = printer.orientation() == QPrinter.Landscape
+    landscape = layout.orientation() == QPageLayout.Orientation.Landscape
     if landscape:
         o['landscape'] = 'true'
 
-    # double sided
+    # double-sided
     duplex = printer.duplex()
-    o['sides'] = (
-        'two-sided-long-edge' if duplex == QPrinter.DuplexMode.DuplexLongSide or
-                        (duplex == QPrinter.DuplexMode.DuplexAuto and not landscape) else
-        'two-sided-short-edge' if duplex == QPrinter.DuplexMode.DuplexShortSide or
-                        (duplex == QPrinter.DuplexMode.DuplexAuto and landscape) else
-        'one-sided')
+    if duplex in DUPLEX_MODES:
+        o['sides'] = DUPLEX_MODES[duplex]
+    elif duplex == QPrinter.DuplexMode.DuplexAuto:
+        o['sides'] = 'two-sided-short-edge' if landscape else 'two-sided-long-edge'
+    else:
+        o['sides'] = 'one-sided'
 
     # grayscale
     if printer.colorMode() == QPrinter.ColorMode.GrayScale:
@@ -308,7 +383,7 @@ def options(printer):
     return o
 
 
-def clearPageSetSetting(printer):
+def clearPageSetSetting(printer: QPrinter) -> None:
     """Remove 'page-set' even/odd cups options from the printer's CUPS options.
 
     Qt's QPrintDialog fails to reset the 'page-set' option back to 'all pages',
@@ -384,3 +459,8 @@ PAPER_SOURCES = {
     QPrinter.PaperSource.SmallFormat: "SmallFormat",
 }
 
+DUPLEX_MODES = {
+    QPrinter.DuplexMode.DuplexLongSide: 'two-sided-long-edge',
+    QPrinter.DuplexMode.DuplexShortSide: 'two-sided-short-edge',
+    QPrinter.DuplexMode.DuplexNone: 'one-sided',
+}

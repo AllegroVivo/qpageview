@@ -22,16 +22,22 @@
 """
 Run jobs in the background using QThread.
 """
+from __future__ import annotations
 
+from typing import TYPE_CHECKING, Set, List, Optional, Any, Callable
 
-from PyQt6.QtCore import QThread
+from PySide6.QtCore import QThread, QObject
+
+if TYPE_CHECKING:
+    from .page import AbstractPage
 
 # as soon as a Job start()s, it is saved here, to prevent it being
 # destroyed while running
-_runningJobs = set()
-_pendingJobs = []
-maxjobs = 12
+_runningJobs: Set["Job"] = set()
+_pendingJobs: List["Job"] = []
+maxjobs: int = 12
 
+FinalizeCallback = Optional[Callable[[Any], None]]
 
 class Job(QThread):
     """A simple wrapper around QThread.
@@ -44,17 +50,20 @@ class Job(QThread):
     yourself. The result of the work function is stored in the result attribute.
 
     """
-    finalize = None
-    running = False
-    done = False
-    result = None
+    callbacks: Set[Optional[Callable[[AbstractPage], None]]]
+    mutex: Any
 
-    def __init__(self, parent=None):
+    finalize: FinalizeCallback = None
+    running: bool = False
+    done: bool = False
+    result: Optional[Any] = None
+
+    def __init__(self, parent: Optional[QObject] = None):
         """Init ourselves; the parent can be a QObject which will be our parent."""
         super().__init__(parent)
         self.finished.connect(self._slotFinished)
 
-    def start(self):
+    def start(self, **kwargs: Any) -> None:
         self.result = None
         self.running = True     # this is more robust than isRunning()
         self.done = False
@@ -64,14 +73,14 @@ class Job(QThread):
         else:
             _pendingJobs.append(self)
 
-    def run(self):
+    def run(self) -> None:
         """Call the work function in the background thread."""
         self.result = self.work()
 
-    def work(self):
+    def work(self) -> Any:
         """Implement this to get the work done.
 
-        If you have long tasks you can Qt's isInterruptionRequested()
+        If you have long tasks you can use Qt's isInterruptionRequested()
         functionality.
 
         Instead of implementing this method, you can put the work function in
@@ -80,7 +89,7 @@ class Job(QThread):
         """
         pass
 
-    def finish(self):
+    def finish(self) -> None:
         """This slot is called in the main thread when the work is done.
 
         The default implementation calls the finalize function with the result.
@@ -89,7 +98,7 @@ class Job(QThread):
         if self.finalize:
             self.finalize(self.result)
 
-    def _slotFinished(self):
+    def _slotFinished(self) -> None:
         _runningJobs.discard(self)
         if _pendingJobs:
             _pendingJobs.pop().start()
@@ -106,9 +115,9 @@ class SingleRun:
 
     """
     def __init__(self):
-        self._job = None
+        self._job: Optional[Job] = None
 
-    def cancel(self):
+    def cancel(self) -> None:
         """Forgets the running job.
 
         The job is not terminated but the callback is not called.
@@ -119,7 +128,7 @@ class SingleRun:
             j.finalize = None
             self._job = None
 
-    def __call__(self, func, callback=None):
+    def __call__( self, func: Callable[[], Any], callback: FinalizeCallback = None) -> None:
         self.cancel()
         j = self._job = Job()
         j.work = func
@@ -131,7 +140,7 @@ class SingleRun:
         j.start()
 
 
-def run(func, callback=None):
+def run(func: Callable[[], Any], callback: FinalizeCallback = None):
     """Run specified function in a background thread.
 
     The thread is immediately started. If a callback is specified, it is called
@@ -142,5 +151,3 @@ def run(func, callback=None):
     j.work = func
     j.finalize = callback
     j.start()
-
-

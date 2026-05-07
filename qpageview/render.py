@@ -22,52 +22,83 @@
 """
 Infrastructure for rendering and caching Page images.
 """
+from __future__ import annotations
 
-import collections
 import sys
 import time
+from types import TracebackType
+from typing import (
+    TYPE_CHECKING, NamedTuple, Any, Tuple, List, Dict, Optional,
+    Self, Iterator, Union, Callable, Sequence, Type
+)
 
-from PyQt6.QtCore import QRect, QRectF, Qt
-from PyQt6.QtGui import QColor, QImage, QPainter, QRegion, QTransform
+from PySide6.QtCore import QRect, QRectF, Qt
+from PySide6.QtGui import (
+    QColor, QImage, QPainter, QRegion, QTransform, QPaintDevice
+)
 
-from . import backgroundjob
-from . import cache
 from . import util
+from .backgroundjob import Job
+from .cache import ImageCache
+from .constants import Rotation
 
-#: Describes a tile to render. Most times all coordinates are integers.
-#: The needed tiles for a page are yielded by :meth:`AbstractRenderer.tiles`.
-Tile = collections.namedtuple('Tile', 'x y w h')
-Tile.x.__doc__ = "The x coordinate of the tile"
-Tile.y.__doc__ = "The y coordinate of the tile"
-Tile.w.__doc__ = "The width of the tile"
-Tile.h.__doc__ = "The height of the tile"
+if TYPE_CHECKING:
+    from .page import AbstractPage
+    from .image import ImagePage
 
-#: Identifies a render operation for a Page, returned by
-#: :meth:`AbstractRenderer.key`.
-Key = collections.namedtuple("Key", "group ident rotation width height")
-Key.group.__doc__ = "The :meth:`~.page.AbstractPage.group` of the page"
-Key.ident.__doc__ = "The :meth:`~.page.AbstractPage.ident` of the page"
-Key.rotation.__doc__ = "The :attr:`~.page.AbstractPage.computedRotation` of the page"
-Key.width.__doc__ = "The :attr:`~.util.Rectangular.width` of the page"
-Key.height.__doc__ = "The :attr:`~.util.Rectangular.height` of the page"
 
-#: Information about cached or missing rendered tiles to display a rectangular
-#: part of a Page at a certain size. Returned by :meth:`AbstractRenderer.info`.
-RenderInfo = collections.namedtuple("RenderInfo", "images missing key target ratio")
-RenderInfo.images.__doc__ = "a list of tuples (tile, image) that are available in the cache"
-RenderInfo.missing.__doc__ = "a list of Tile instances that are needed but not available in the cache"
-RenderInfo.key.__doc__ = "the Key returned by :meth:`~AbstractRenderer.key`, describing width, height, rotation and identity of the page"
-RenderInfo.target.__doc__ = "the rect multiplied by the ratio"
-RenderInfo.images.__doc__ = "the devicepixelratio of the specified paint device"
+class Tile(NamedTuple):
+    """
+    Describes a tile to render. Most times all coordinates are integers.
+
+    The needed tiles for a page are yielded by :meth:`AbstractRenderer.tiles`.
+    """
+    x: int
+    """The x coordinate of the tile"""
+    y: int
+    """The y coordinate of the tile"""
+    w: int
+    """The width of the tile"""
+    h: int
+    """The height of the tile"""
+
+class Key(NamedTuple):
+    """Identifies a render operation for a Page, returned by :meth:`AbstractRenderer.key`."""
+    group: Any
+    """The :meth:`~.page.AbstractPage.group` of the page"""
+    ident: Any
+    """The :meth:`~.page.AbstractPage.ident` of the page"""
+    rotation: Rotation
+    """The :attr:`~.page.AbstractPage.computedRotation` of the page"""
+    width: int
+    """The :attr:`~.util.Rectangular.width` of the page"""
+    height: int
+    """The :attr:`~.util.Rectangular.height` of the page"""
+
+class RenderInfo(NamedTuple):
+    """
+    Information about cached or missing rendered tiles to display a rectangular
+    part of a Page at a certain size. Returned by :meth:`AbstractRenderer.info`.
+    """
+    images: List[Tuple[Tile, QImage]]
+    """a list of tuples (tile, image) that are available in the cache"""
+    missing: List[Tile]
+    """a list of Tile instances that are needed but not available in the cache"""
+    key: Key
+    """the Key returned by :meth:`~AbstractRenderer.key`, describing width, height, rotation and identity of the page"""
+    target: QRect
+    """the rect multiplied by the ratio"""
+    ratio: float
+    """the devicepixelratio of the specified paint device"""
 
 # the maximum number of concurrent jobs (at global level)
-maxjobs = 4
+maxjobs: int = 4
 
 # we use a global dict to keep running jobs in, so a thread is never
 # deallocated when a renderer dies.
-_jobs = {}
+_jobs: Dict[Tuple[Key, Tile], Job] = {}
 
-
+RendererCallback = Callable[["AbstractPage"], None]
 
 class AbstractRenderer:
     """Handle rendering and caching of images.
@@ -99,24 +130,25 @@ class AbstractRenderer:
         antialias anyway, even if this is False.)
 
     """
+    cache: ImageCache
 
-    MAX_TILE_WIDTH = 2400
-    MAX_TILE_HEIGHT = 1600
+    MAX_TILE_WIDTH: int = 2400
+    MAX_TILE_HEIGHT: int = 1600
 
     # default paper color to use (if possible, and when drawing an empty page)
-    paperColor = QColor(Qt.GlobalColor.white)
+    paperColor: QColor = QColor(Qt.GlobalColor.white)
 
     # QImage format to use (if possible)
-    imageFormat = QImage.Format.Format_ARGB32_Premultiplied
+    imageFormat: QImage.Format = QImage.Format.Format_ARGB32_Premultiplied
 
     # antialias True by default (not all renderers may support this)
-    antialiasing = True
+    antialiasing: bool = True
 
-    def __init__(self, cache=None):
+    def __init__(self, cache: Optional[ImageCache] = None):
         if cache:
             self.cache = cache
 
-    def copy(self):
+    def copy(self) -> Self:
         """Return a copy of the renderer, with always a new cache."""
         c = self.cache
         if c:
@@ -124,15 +156,15 @@ class AbstractRenderer:
             c.__dict__.update(self.cache.__dict__)
         r = type(self)(c)
         r.__dict__.update(self.__dict__)
-        return r
+        return r  # type: ignore - this is ultimately self - SP
 
     @staticmethod
-    def key(page, ratio):
+    def key(page: AbstractPage, ratio: float) -> Key:
         """Return a five-tuple Key describing the page.
 
         The ratio is a device pixel ratio; width and height are multiplied
-        with this value, to render and cache an image correctly on high-
-        density displays.
+        with this value, to render and cache an image correctly on
+        high-density displays.
 
         This is used for rendering and caching. It is never stored as is.
         The cache can store the group object using a weak reference.
@@ -158,7 +190,7 @@ class AbstractRenderer:
             int(page.height * ratio),
         )
 
-    def tiles(self, width, height):
+    def tiles(self, width: int, height: int) -> Iterator[Tile]:
         """Yield four-tuples Tile(x, y, w, h) describing the tiles to render."""
         rowcount = height // self.MAX_TILE_HEIGHT
         colcount = width  // self.MAX_TILE_WIDTH
@@ -174,7 +206,8 @@ class AbstractRenderer:
                 x += w
             y += h
 
-    def map(self, key, box):
+    @staticmethod
+    def map(key: Key, box: Union[QRect, QRectF]) -> QTransform:
         """Return a QTransform converting from Key coordinates to a box.
 
         The box should be a QRectF or QRect, and describes the original area of
@@ -191,7 +224,14 @@ class AbstractRenderer:
         t.scale(1 / key.width, 1 / key.height)
         return t
 
-    def image(self, page, rect, dpiX, dpiY, paperColor):
+    def image(
+        self,
+        page: AbstractPage,
+        rect: QRectF,
+        dpiX: float,
+        dpiY: float,
+        paperColor: Optional[QColor]
+    ) -> QImage:
         """Returns a QImage of the specified rectangle on the Page.
 
         The rectangle is relative to the top-left position. The image is not
@@ -203,18 +243,26 @@ class AbstractRenderer:
         vscale = s.height() * dpiY / page.dpi / page.height
         matrix = QTransform().scale(hscale, vscale)
 
-        tile = Tile(*matrix.mapRect(rect).getRect())
-        key = Key(page.group(),
-                  page.ident(),
-                  page.computedRotation,
-                 *matrix.map(page.width, page.height))
+        tile = Tile(*matrix.mapRect(rect).getRect())  # type: ignore - getRect() returns a QRect, which we can unpack to Tile - SP
+        key = Key(
+            page.group(),
+            page.ident(),
+            page.computedRotation,
+            *matrix.map(page.width, page.height)  # type: ignore - ??? - SP
+        )
         return self.render(page, key, tile, paperColor)
 
-    def render(self, page, key, tile, paperColor=None):
+    def render(
+        self,
+        page: AbstractPage,
+        key: Key,
+        tile: Tile,
+        paperColor: Optional[QColor] = None
+    ) -> QImage:
         """Generate a QImage for tile of the Page.
 
         The width, height and rotation to render at should be taken from the
-        key, as the page could be resized or rotated in the mean time.
+        key, as the page could be resized or rotated in the meantime.
 
         The default implementation prepares the image, a painter and then
         calls draw() to actually draw the contents.
@@ -239,14 +287,21 @@ class AbstractRenderer:
         self.draw(page, painter, key, tile, paperColor)
         return i
 
-    def draw(self, page, painter, key, tile, paperColor=None):
+    def draw(
+        self,
+        page: AbstractPage,
+        painter: QPainter,
+        key: Key,
+        tile: Tile,
+        paperColor: Optional[QColor] = None
+    ) -> None:
         """Draw the page contents; implement at least this method.
 
         The painter is already at the top-left position and the correct
         rotation. You should convert the tile to the original area on the page,
         you can use the map() method for that. You can draw in tile/key
         coordinates. Don't use width, height and rotation from the Page object,
-        as it could have been resized or rotated in the mean time.
+        as it could have been resized or rotated in the meantime.
 
         The paperColor can be specified, but it is not needed to paint it: by
         default the render() method already fills the image, and when drawing on
@@ -255,7 +310,7 @@ class AbstractRenderer:
         """
         pass
 
-    def info(self, page, device, rect):
+    def info(self, page: AbstractPage, device: QPaintDevice, rect: QRect) -> RenderInfo:
         """Return a namedtuple RenderInfo(images, missing, key, target, ratio).
 
         images is a list of tuples (tile, image) that are available in the
@@ -292,10 +347,16 @@ class AbstractRenderer:
 
         return RenderInfo(images, missing, key, target, ratio)
 
-    def update(self, page, device, rect, callback=None):
+    def update(
+        self,
+        page: AbstractPage,
+        device: QPaintDevice,
+        rect: QRect,
+        callback: Optional[RendererCallback] = None
+    ) -> bool:
         """Check if a page can be painted on the device without waiting.
 
-        Return True if that is the case. Otherwise schedules missing tiles
+        Return True if that is the case. Otherwise, schedules missing tiles
         for rendering and calls the callback each time one tile if finished.
 
         """
@@ -305,7 +366,13 @@ class AbstractRenderer:
             return False
         return True
 
-    def paint(self, page, painter, rect, callback=None):
+    def paint(
+        self,
+        page: AbstractPage,
+        painter: QPainter,
+        rect: QRect,
+        callback: RendererCallback = None
+    ) -> None:
         """Paint a page, using images from the cache.
 
         ``page``:
@@ -319,7 +386,7 @@ class AbstractRenderer:
 
         ``callback``:
             if specified, a callable accepting the `page` argument.
-            Typically this should be used to trigger a repaint of the view.
+            Typically, this should be used to trigger a repaint of the view.
 
         The Page calls this method by default in its
         :meth:`~.page.AbstractPage.paint` method. This method tries to fetch an
@@ -329,13 +396,13 @@ class AbstractRenderer:
         painted in the meantime (e.g. scaled from another size).
 
         """
-        images = [] # list of images to draw at end of this method
-        region = QRegion() # painted region in tile coordinates
+        images = []  # list of images to draw at end of this method
+        region = QRegion()  # painted region in tile coordinates
 
         info = self.info(page, painter.device(), rect)
 
         for t, image in info.images:
-            r = QRect(*t) & info.target # part of the tile that needs to be drawn
+            r = QRect(*t) & info.target  # part of the tile that needs to be drawn
             images.append((r, image,  QRectF(r.translated(-t.x, -t.y))))
             region += r
 
@@ -352,8 +419,10 @@ class AbstractRenderer:
                     r = QRect(int(t.x * hscale), int(t.y * vscale), int(t.w * hscale), int(t.h * vscale)) & info.target
                     if r and QRegion(r).subtracted(region):
                         # we have an image that can be drawn in rect r
-                        source = QRectF(r.x() / hscale - t.x, r.y() / vscale - t.y,
-                                        r.width() / hscale, r.height() / vscale)
+                        source = QRectF(
+                            r.x() / hscale - t.x, r.y() / vscale - t.y,
+                            r.width() / hscale, r.height() / vscale
+                        )
                         images.append((r, tileset[t].image, source))
                         region += r
                         # stop if we have covered the whole drawing area
@@ -373,7 +442,13 @@ class AbstractRenderer:
             target = QRectF(r.x() / info.ratio, r.y() / info.ratio, r.width() / info.ratio, r.height() / info.ratio)
             painter.drawImage(target, image, source)
 
-    def schedule(self, page, key, tiles, callback):
+    def schedule(
+        self,
+        page: AbstractPage,
+        key: Key,
+        tiles: Sequence[Tile],
+        callback: Optional[RendererCallback]
+    ) -> None:
         """Schedule a new rendering job for the specified tiles of the page.
 
         If this page has already a job pending, the callback is added to the
@@ -390,9 +465,9 @@ class AbstractRenderer:
             job.callbacks.add(callback)
         self.checkstart()
 
-    def job(self, page, key, tile):
+    def job(self, page: AbstractPage, key: Key, tile: Tile) -> Job:
         """Return a new :class:`~.backgroundjob.Job` tailored for this tile."""
-        job = backgroundjob.Job()
+        job = Job()
         job.callbacks = callbacks = set()
         job.mutex = page.mutex()
         exception = []
@@ -414,7 +489,7 @@ class AbstractRenderer:
         job.finalize = finalize
         return job
 
-    def unschedule(self, pages, callback):
+    def unschedule(self, pages: Sequence[AbstractPage], callback: RendererCallback) -> None:
         """Unschedule a possible pending rendering job for the given pages.
 
         If the pending job has no other callbacks left, it is removed,
@@ -432,12 +507,13 @@ class AbstractRenderer:
             job = _jobs.pop(jobkey)
             job.finalize = job.work = None
 
-    def invalidate(self, pages):
+    def invalidate(self, pages: Sequence[ImagePage]) -> None:
         """Delete the cached images for the given pages."""
         for p in pages:
             self.cache.invalidate(p)
 
-    def checkstart(self):
+    @staticmethod
+    def checkstart() -> None:
         """Check whether there are jobs that need to be started.
 
         This method is called by the schedule() method, and by the finish()
@@ -446,8 +522,11 @@ class AbstractRenderer:
 
         """
         runningjobs = [job for job in _jobs.values() if job.running]
-        waitingjobs = sorted((job for job in _jobs.values() if not job.running),
-                        key=lambda j: j.time, reverse=True)     # newest first
+        waitingjobs = sorted(
+            (job for job in _jobs.values() if not job.running),
+            key=lambda j: j.time,
+            reverse=True  # newest first
+        )
 
         jobcount = maxjobs - len(runningjobs)
         if jobcount > 0:
@@ -462,7 +541,12 @@ class AbstractRenderer:
                     if jobcount == 0:
                         break
 
-    def exception(self, exctype, excvalue, exctb):
+    @staticmethod
+    def exception(
+        exctype: Type[BaseException],
+        excvalue: BaseException,
+        exctb: TracebackType
+    ) -> None:
         """Called when an exception has occurred in a background rendering job.
 
         The default implementation prints a traceback to stderr.
@@ -472,8 +556,5 @@ class AbstractRenderer:
         traceback.print_exception(exctype, excvalue, exctb)
 
 
-
 # install a global cache to use by default
-AbstractRenderer.cache = cache.ImageCache()
-
-
+AbstractRenderer.cache = ImageCache()
