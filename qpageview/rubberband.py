@@ -25,10 +25,15 @@ Rubberband selection in a View.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Union, Literal, Optional, Iterator, Tuple, Set
+from typing import (
+    TYPE_CHECKING, Union, Literal, Optional, Iterator, Tuple, Set
+)
 
 from PySide6.QtCore import QEvent, QRect, QSize, Qt, Signal, QPoint
-from PySide6.QtGui import QContextMenuEvent, QCursor, QPainter, QPalette, QPen, QRegion, QPaintEvent, QColor, QImage, QMouseEvent
+from PySide6.QtGui import (
+    QContextMenuEvent, QCursor, QPainter, QPalette, QPen, QRegion,
+    QPaintEvent, QColor, QImage, QMouseEvent
+)
 from PySide6.QtWidgets import QApplication, QWidget, QAbstractScrollArea
 
 if TYPE_CHECKING:
@@ -90,7 +95,7 @@ class Rubberband(QWidget):
         self._dragedge: Edge = 0
         self._dragpos: Optional[QPoint] = None
         self._selection: QRect = QRect()
-        self._layoutOffset: Optional = None   # used to keep on spot during resize/zoom
+        self._layoutOffset: Tuple[int, float, float] = None   # type: ignore - used to keep on spot during resize/zoom
         self.setMouseTracking(True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.PreventContextMenu)
 
@@ -355,7 +360,6 @@ class Rubberband(QWidget):
     def slotZoomChanged(self, zoom: float) -> None:
         """Called when the zooming in the view changes, resizes ourselves."""
         if self.hasSelection():
-            view = self.parent().parent()
             factor = zoom / self._oldZoom
             self._oldZoom = zoom
             geom = QRect(self._getLayoutOffset(), self.size() * factor)

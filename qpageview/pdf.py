@@ -26,11 +26,12 @@ PDF rendering backend using QtPdf.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Tuple, Optional, Iterator, Union, Type
+from typing import TYPE_CHECKING, Tuple, Optional, Iterator, Union, Type, Literal
 
 import platform
 
-from PySide6.QtCore import Qt, QByteArray, QModelIndex, QRect, QRectF, QSize, QUrl
+from PySide6.QtCore import Qt, QByteArray, QModelIndex, QRect, QRectF, QSize, QUrl, QSizeF, QBuffer
+from PySide6.QtGui import QPainter, QColor
 from PySide6.QtPdf import QPdfDocument, QPdfDocumentRenderOptions, QPdfLinkModel
 
 # Check for PDF link support (added in Qt 6.6)
@@ -50,24 +51,24 @@ from PySide6.QtPdf import QPdfDocument, QPdfDocumentRenderOptions, QPdfLinkModel
 from .document import SingleSourceDocument
 from .page import AbstractRenderedPage
 from . import link
-from . import locking
-from . import render
+from .locking import lock
+from .render import Tile, AbstractRenderer, Key
 
 if TYPE_CHECKING:
-    from .render import AbstractRenderer
+    pass
 
 FilenameType = Union[str, QByteArray, QPdfDocument]
 
 class Link(link.Link):
     """A link that encapsulates QPdfLinkModel data."""
-    def __init__(self, linkobj: QPdfLinkModel, index: QModelIndex, pointSize: QSize):
+    def __init__(self, linkobj: QPdfLinkModel, index: QModelIndex, pointSize: QSizeF):
         self._targetPage: int = linkobj.data(index, QPdfLinkModel.Role.Page.value)
         self._url: str = linkobj.data(index, QPdfLinkModel.Role.Url.value).toString()
         # Convert to relative coordinates between 0.0 and 1.0 as expected
         # by link.Link, which uses them for compatibility with Poppler
         rect = linkobj.data(index, QPdfLinkModel.Role.Rectangle.value)
         x1, y1, x2, y2 = rect.normalized().getCoords()
-        self.area: Tuple[int, int, int, int] = (
+        self.area: Tuple[float, float, float, float] = (
             x1 / pointSize.width(), y1 / pointSize.height(),
             x2 / pointSize.width(), y2 / pointSize.height()
         )
@@ -125,6 +126,7 @@ class PdfPage(AbstractRenderedPage):
 
     """
     _linksCache: link.Links
+    renderer: PdfRenderer
 
     def __init__(
         self,
@@ -188,7 +190,7 @@ class PdfPage(AbstractRenderedPage):
     def text(self, rect: QRect) -> str:
         """Returns text inside rectangle."""
         rectf = self.mapFromPage(self.pageWidth, self.pageHeight).rect(rect)
-        with locking.lock(self.document):
+        with lock(self.document):
             return self.document.getSelection(
                 self.pageNumber, rectf.topLeft(), rectf.bottomRight()
             ).text()
@@ -203,7 +205,7 @@ class PdfPage(AbstractRenderedPage):
                 # Link support is unavailable; return an empty cache
                 self._linksCache = link.Links()
                 return self._linksCache
-            with locking.lock(document):
+            with lock(document):
                 lm = QPdfLinkModel(document=document, page=pageNumber)
                 parentIndex = QModelIndex()
                 links = []
@@ -220,22 +222,26 @@ class PdfDocument(SingleSourceDocument):
     """A lazily loaded PDF document."""
     pageClass: Type[PdfPage] = PdfPage
 
-    def __init__(self, source=None, renderer=None):
+    def __init__(
+        self,
+        source: Optional[QPdfDocument] = None,
+        renderer: Optional[AbstractRenderer] = None
+    ):
         super().__init__(source, renderer)
         self._document = None
 
-    def invalidate(self):
+    def invalidate(self) -> None:
         """Reimplemented to clear the Document reference."""
         super().invalidate()
         self._document = None
 
-    def createPages(self):
+    def createPages(self) -> Tuple[PdfPage, ...]:
         doc = self.document()
         if doc:
-            return self.pageClass.loadDocument(doc, self.renderer)
+            return tuple(self.pageClass.loadDocument(doc, self.renderer))  # type: ignore - doc is not False here - SP
         return ()
 
-    def document(self):
+    def document(self) -> Union[QPdfDocument, Literal[False]]:
         """Return the QPdfDocument object.
 
         Returns None if no source was yet set, and False if loading failed.
@@ -245,13 +251,13 @@ class PdfDocument(SingleSourceDocument):
             source = self.source()
             if source:
                 self._document = load(source) or False
-        return self._document
+        return self._document  # type: ignore - this results in QPdfDocument | bool - SP
 
 
-class PdfRenderer(render.AbstractRenderer):
-    oversampleThreshold = 96    # DPI of a standard PC screen
+class PdfRenderer(AbstractRenderer):
+    oversampleThreshold: int = 96    # DPI of a standard PC screen
 
-    def tiles(self, width, height):
+    def tiles(self, width: int, height: int) -> Iterator[Tile]:
         """Yield four-tuples Tile(x, y, w, h) describing the tiles to render.
 
         For the QtPdf backend, this always returns a single tile covering
@@ -259,9 +265,16 @@ class PdfRenderer(render.AbstractRenderer):
         a smaller area.
 
         """
-        yield render.Tile(0, 0, width, height)
+        yield Tile(0, 0, width, height)
 
-    def draw(self, page, painter, key, tile, paperColor=None):
+    def draw(
+        self,
+        page: PdfPage,
+        painter: QPainter,
+        key: Key,
+        tile: Tile,
+        paperColor: Optional[QColor] = None
+    ) -> None:
         """Draw a tile on the painter.
 
         The painter is already at the right position and rotation.
@@ -320,7 +333,7 @@ class PdfRenderer(render.AbstractRenderer):
         # that if we are oversampling)
         s = matrix.scale(xMultiplier, yMultiplier).mapRect(source)
         renderSize = QSize(int(s.width()), int(s.height()))
-        with locking.lock(doc):
+        with lock(doc):
             image = doc.render(num, renderSize, renderOptions)
 
         if tile != (0, 0, key.width, key.height):
@@ -329,9 +342,11 @@ class PdfRenderer(render.AbstractRenderer):
 
         if actualSize and QRectF(image.rect()) != target:
             # Scale the image to our requested resolution
-            image = image.scaled(int(target.width()), int(target.height()),
+            image = image.scaled(
+                int(target.width()), int(target.height()),
                 Qt.AspectRatioMode.IgnoreAspectRatio,
-                Qt.TransformationMode.SmoothTransformation)
+                Qt.TransformationMode.SmoothTransformation
+            )
 
         # Erase the target area and draw the image
         painter.eraseRect(target)
@@ -340,7 +355,7 @@ class PdfRenderer(render.AbstractRenderer):
         painter.drawImage(target, image, QRectF(image.rect()))
 
 
-def load(source):
+def load(source: Union[QPdfDocument, str, QByteArray]) -> Optional[QPdfDocument]:
     """Load a PDF document.
 
     Source may be:
@@ -353,12 +368,20 @@ def load(source):
     """
     if isinstance(source, QPdfDocument):
         return source
-    elif isinstance(source, str) or isinstance(source, QByteArray):
-        # We need to create the QPdfDocument without a parent QObject so
-        # Python can garbage-collect it properly when it goes out of scope
-        document = QPdfDocument(None)  # type: ignore - parent has no default value
-        document.load(source)
-        return document
+
+    # We need to create the QPdfDocument without a parent QObject so
+    # Python can garbage-collect it properly when it goes out of scope
+    document = QPdfDocument(None)  # type: ignore - parent has no default value
+    if isinstance(source, str):
+        if document.load(source) != QPdfDocument.Error.None_:
+            return None
+    elif isinstance(source, QByteArray):
+        buffer = QBuffer(source, document)
+        buffer.open(QBuffer.OpenModeFlag.ReadOnly)
+        document.load(buffer)
+        if document.error() != QPdfDocument.Error.None_:
+            return None
+    return document
 
 
 # Install a default renderer so PdfPage can be used directly

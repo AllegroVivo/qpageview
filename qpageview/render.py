@@ -24,20 +24,22 @@ Infrastructure for rendering and caching Page images.
 """
 from __future__ import annotations
 
-from types import TracebackType
-from typing import TYPE_CHECKING, NamedTuple, Any, Tuple, List, Dict, Optional, Self, Iterator, Union, Callable, Sequence, Type
-
 import sys
 import time
+from types import TracebackType
+from typing import (
+    TYPE_CHECKING, NamedTuple, Any, Tuple, List, Dict, Optional,
+    Self, Iterator, Union, Callable, Sequence, Type
+)
 
 from PySide6.QtCore import QRect, QRectF, Qt
 from PySide6.QtGui import (
     QColor, QImage, QPainter, QRegion, QTransform, QPaintDevice
 )
 
+from . import util
 from .backgroundjob import Job
 from .cache import ImageCache
-from . import util
 from .constants import Rotation
 
 if TYPE_CHECKING:
@@ -368,7 +370,7 @@ class AbstractRenderer:
         self,
         page: AbstractPage,
         painter: QPainter,
-        rect: QRectF,
+        rect: QRect,
         callback: RendererCallback = None
     ) -> None:
         """Paint a page, using images from the cache.
@@ -510,7 +512,8 @@ class AbstractRenderer:
         for p in pages:
             self.cache.invalidate(p)
 
-    def checkstart(self) -> None:
+    @staticmethod
+    def checkstart() -> None:
         """Check whether there are jobs that need to be started.
 
         This method is called by the schedule() method, and by the finish()
@@ -543,7 +546,7 @@ class AbstractRenderer:
         exctype: Type[BaseException],
         excvalue: BaseException,
         exctb: TracebackType
-    ):
+    ) -> None:
         """Called when an exception has occurred in a background rendering job.
 
         The default implementation prints a traceback to stderr.

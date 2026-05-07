@@ -26,19 +26,27 @@ Automatically displays all pages in a view in small size, and makes it easier
 to browse large documents.
 
 """
+from __future__ import annotations
+
+from typing import Optional, Any
 
 from PySide6.QtCore import QEvent, QMargins, QRect, Qt
-from PySide6.QtGui import QPainter
+from PySide6.QtGui import QPainter, QPaintEvent, QWheelEvent, QKeyEvent, QResizeEvent
+from PySide6.QtWidgets import QWidget
 
-from . import constants
-from . import layout
-from . import selector
-from . import view
-from . import util
+from .constants import (
+    Orientation,
+    FitWidth,
+    FitHeight,
+    Vertical,
+    Horizontal,
+)
+from .selector import SelectorViewMixin
+from .view import View
+from .util import LongMousePressMixin
 
 
-
-class SidebarView(selector.SelectorViewMixin, util.LongMousePressMixin, view.View):
+class SidebarView(SelectorViewMixin, LongMousePressMixin, View):
     """A special View with miniatures to use as a sidebar for a View.
 
     Automatically displays all pages in a view in small size, and makes it
@@ -47,38 +55,38 @@ class SidebarView(selector.SelectorViewMixin, util.LongMousePressMixin, view.Vie
 
     """
 
-    MAX_ZOOM = 1.0
-    pagingOnScrollEnabled = False
-    wheelZoomingEnabled = False
-    firstPageNumber = 1
-    scrollupdatespersec = 100
+    MAX_ZOOM: float = 1.0
+    pagingOnScrollEnabled: bool = False
+    wheelZoomingEnabled: bool = False
+    firstPageNumber: int = 1
+    scrollupdatespersec: int = 100
 
-    autoOrientationEnabled = True
+    autoOrientationEnabled: bool = True
 
-    def __init__(self, parent=None, **kwargs):
+    def __init__(self, parent: Optional[QWidget] = None, **kwargs: Any):
         super().__init__(parent, **kwargs)
-        self._view = None
-        self.setOrientation(constants.Vertical)
+        self._view: Optional[View] = None
+        self.setOrientation(Vertical)
         self.pageLayout().spacing = 1
         self.pageLayout().setMargins(QMargins(0, 0, 0, 0))
         self.pageLayout().setPageMargins(QMargins(4, 4, 4, 20))
         self.setLayoutFontHeight()
         self.currentPageNumberChanged.connect(self.viewport().update)
 
-    def setOrientation(self, orientation):
+    def setOrientation(self, orientation: Orientation) -> None:
         """Reimplemented to also set the corresponding view mode."""
         super().setOrientation(orientation)
-        if orientation == constants.Vertical:
-            self.setViewMode(constants.FitWidth)
+        if orientation == Vertical:
+            self.setViewMode(FitWidth)
         else:
-            self.setViewMode(constants.FitHeight)
+            self.setViewMode(FitHeight)
 
-    def setLayoutFontHeight(self):
+    def setLayoutFontHeight(self) -> None:
         """Reads the current font height and reserves enough space in the layout."""
         self.pageLayout().pageMargins().setBottom(self.fontMetrics().height())
         self.updatePageLayout()
 
-    def setView(self, view):
+    def setView(self, view: Optional[View]) -> None:
         """Connects to a View, or disconnects the current view if view is None."""
         if view is not self._view:
             if self._view:
@@ -94,13 +102,13 @@ class SidebarView(selector.SelectorViewMixin, util.LongMousePressMixin, view.Vie
                 view.currentPageNumberChanged.connect(self.slotCurrentPageNumberChanged)
                 view.pageLayoutUpdated.connect(self.slotLayoutUpdated)
 
-    def slotLayoutUpdated(self):
+    def slotLayoutUpdated(self) -> None:
         """Called when the layout of the connected view is updated."""
         self.pageLayout()[:] = (p.copy(self) for p in self._view.pageLayout())
         self.pageLayout().rotation = self._view.pageLayout().rotation
         self.updatePageLayout()
 
-    def slotCurrentPageNumberChanged(self, num):
+    def slotCurrentPageNumberChanged(self, num: int) -> None:
         """Called when the page number in the connected view changes.
 
         Does not scroll but updates the current page mark in our View.
@@ -109,7 +117,7 @@ class SidebarView(selector.SelectorViewMixin, util.LongMousePressMixin, view.Vie
         self._currentPageNumber = num
         self.viewport().update()
 
-    def paintEvent(self, ev):
+    def paintEvent(self, ev: QPaintEvent) -> None:
         """Reimplemented to print page numbers and a selection box."""
         painter = QPainter(self.viewport())
         layout = self.pageLayout()
@@ -126,14 +134,14 @@ class SidebarView(selector.SelectorViewMixin, util.LongMousePressMixin, view.Vie
             painter.drawText(textr, Qt.AlignmentFlag.AlignCenter, str(layout.index(p) + self.firstPageNumber))
         super().paintEvent(ev)
 
-    def wheelEvent(self, ev):
+    def wheelEvent(self, ev: QWheelEvent) -> None:
         """Reimplemented to page instead of scroll."""
         if ev.angleDelta().y() > 0:
             self.gotoPreviousPage()
         elif ev.angleDelta().y() < 0:
             self.gotoNextPage()
 
-    def keyPressEvent(self, ev):
+    def keyPressEvent(self, ev: QKeyEvent) -> None:
         """Reimplemented to page instead of scroll."""
         if ev.key() in (Qt.Key.Key_PageDown, Qt.Key.Key_Down):
             self.gotoNextPage()
@@ -146,20 +154,18 @@ class SidebarView(selector.SelectorViewMixin, util.LongMousePressMixin, view.Vie
         else:
             super().keyPressEvent(ev)
 
-    def resizeEvent(self, ev):
+    def resizeEvent(self, ev: QResizeEvent) -> None:
         """Reimplemented to auto-change the orientation if desired."""
         super().resizeEvent(ev)
         if self.autoOrientationEnabled:
             s = ev.size()
-            if s.width() > s.height() and self.orientation() == constants.Vertical:
-                self.setOrientation(constants.Horizontal)
-            elif s.width() < s.height() and self.orientation() == constants.Horizontal:
-                self.setOrientation(constants.Vertical)
+            if s.width() > s.height() and self.orientation() == Vertical:
+                self.setOrientation(Horizontal)
+            elif s.width() < s.height() and self.orientation() == Horizontal:
+                self.setOrientation(Vertical)
 
-    def changeEvent(self, ev):
+    def changeEvent(self, ev: QEvent) -> None:
         """Reimplemented to set the correct font height for the page numbers."""
         super().changeEvent(ev)
         if ev.type() in (QEvent.Type.ApplicationFontChange, QEvent.Type.FontChange):
             self.setLayoutFontHeight()
-
-

@@ -45,7 +45,10 @@ View.setDocument().
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, TypeVar, List, Dict, Optional
+from typing import TYPE_CHECKING, TypeVar, List, Dict, Optional, Union, Iterator
+
+from PySide6.QtCore import QByteArray
+from PySide6.QtPdf import QPdfDocument
 
 if TYPE_CHECKING:
     # noinspection PyUnusedImports
@@ -55,7 +58,7 @@ if TYPE_CHECKING:
 
 TPage = TypeVar("TPage", bound="AbstractPage")
 TSource = TypeVar("TSource")
-VSource = TypeVar("VSource")
+DocumentSource = Union[QPdfDocument, str, QByteArray]
 
 URLDict = Dict[str, Dict[int, List["Area"]]]
 
@@ -168,14 +171,14 @@ class AbstractSourceDocument(Document):
         """Delete all cached pages, and clear filename(s) or source object(s)."""
         self.invalidate()
 
-    def createPages(self) -> Sequence[TPage]:
+    def createPages(self) -> Iterator[TPage]:
         """Implement this method to create and yield the pages.
 
         This method is only called once. After altering filename,-s or
         source,-s, or invalidate(), it is called again.
 
         """
-        return NotImplemented
+        return NotImplemented  # type: ignore - SP
 
     def urls(self) -> URLDict:
         """Reimplemented to cache the urls returned by Document.urls()."""
@@ -188,17 +191,17 @@ class SingleSourceDocument(AbstractSourceDocument):
     """A Document that loads its pages from a single file or source."""
     def __init__(
         self,
-        source: Optional[TSource] = None,
+        source: Optional[DocumentSource] = None,
         renderer: Optional[AbstractRenderer] = None
     ):
         super().__init__(renderer)
-        self._source: Optional[TSource] = source
+        self._source: Optional[DocumentSource] = source
 
-    def source(self) -> Optional[TSource]:
+    def source(self) -> Optional[DocumentSource]:
         """Return a data object that might be set for the whole document."""
         return self._source
 
-    def setSource(self, source: TSource) -> None:
+    def setSource(self, source: DocumentSource) -> None:
         """Set the data object for the whole document. Invalidates the document."""
         self.clear()
         self._source = source
@@ -218,18 +221,18 @@ class MultiSourceDocument(AbstractSourceDocument):
     """A Document that loads every page from its own file or source."""
     def __init__(
         self,
-        sources: Sequence[VSource] = (),
+        sources: Sequence[TSource] = (),
         renderer: Optional[AbstractRenderer] = None
     ):
         super().__init__(renderer)
-        self._sources: List[VSource] = []
+        self._sources: List[TSource] = []
         self._sources.extend(sources)
 
-    def sources(self) -> List[VSource]:
+    def sources(self) -> List[TSource]:
         """Return data objects for every page."""
         return self._sources
 
-    def setSources(self, sources: Sequence[VSource]) -> None:
+    def setSources(self, sources: Sequence[TSource]) -> None:
         """Set data objects for every page. Invalidates the document."""
         self.clear()
         self._sources[:] = sources

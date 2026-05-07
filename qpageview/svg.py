@@ -23,39 +23,41 @@
 A page that can display an SVG document.
 
 """
+from __future__ import annotations
 
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QPainter
+from typing import TYPE_CHECKING, Optional, Union, Iterator, Type
+
+from PySide6.QtCore import QRectF, Qt, QByteArray
+from PySide6.QtGui import QPainter, QColor
 from PySide6.QtSvg import QSvgRenderer
 
-from .constants import (
-    Rotate_0,
-    Rotate_90,
-    Rotate_180,
-    Rotate_270,
-)
+from .document import MultiSourceDocument
+from .locking import lock
+from .page import AbstractRenderedPage
+from .render import AbstractRenderer
 
-from . import document
-from . import locking
-from . import page
-from . import render
+if TYPE_CHECKING:
+    from .render import Key, Tile
 
+class SvgPage(AbstractRenderedPage):
+    """A page that can display an SVG document."""
 
-class SvgPage(page.AbstractRenderedPage):
-    """A page that can display a SVG document."""
+    dpi: float = 90.0
 
-    dpi = 90.0
-
-    def __init__(self, svgrenderer, renderer=None):
+    def __init__(self, svgrenderer: QSvgRenderer, renderer: Optional[AbstractRenderer] = None):
         super().__init__(renderer)
-        self._svg = svgrenderer
-        self.pageWidth = svgrenderer.defaultSize().width()
-        self.pageHeight = svgrenderer.defaultSize().height()
-        self._viewBox = svgrenderer.viewBoxF()
+        self._svg: QSvgRenderer = svgrenderer
+        self.pageWidth: int = svgrenderer.defaultSize().width()
+        self.pageHeight: int = svgrenderer.defaultSize().height()
+        self._viewBox: QRectF = svgrenderer.viewBoxF()
 
     @classmethod
-    def load(cls, filename, renderer=None):
-        """Load a SVG document from filename, which may also be a QByteArray.
+    def load(
+        cls,
+        filename: Union[str, QByteArray],
+        renderer: Optional[AbstractRenderer] = None
+    ) -> Iterator[SvgPage]:
+        """Load an SVG document from filename, which may also be a QByteArray.
 
         Yields only one Page instance, as SVG currently supports one page per
         file. If the file can't be loaded by the underlying QSvgRenderer,
@@ -63,39 +65,46 @@ class SvgPage(page.AbstractRenderedPage):
 
         """
         r = QSvgRenderer()
-        if r.load(filename):
+        if r.load(filename):  # type: ignore - typechecker can't figure out the overloads - SP
             yield cls(r, renderer)
 
-    def mutex(self):
+    def mutex(self) -> QSvgRenderer:
         return self._svg
 
-    def group(self):
+    def group(self) -> QSvgRenderer:
         return self._svg
 
 
-class SvgDocument(document.MultiSourceDocument):
+class SvgDocument(MultiSourceDocument):
     """A Document representing a group of SVG files."""
-    pageClass = SvgPage
+    pageClass: Type[SvgPage] = SvgPage
 
-    def createPages(self):
+    def createPages(self) -> Iterator[SvgPage]:
         return self.pageClass.loadFiles(self.sources(), self.renderer)
 
 
-class SvgRenderer(render.AbstractRenderer):
+class SvgRenderer(AbstractRenderer):
     """Render SVG pages."""
-    def setRenderHints(self, painter):
+    def setRenderHints(self, painter: QPainter) -> None:
         """Sets the renderhints for the painter we want to use."""
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, self.antialiasing)
         painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, self.antialiasing)
 
-    def draw(self, page, painter, key, tile, paperColor=None):
+    def draw(
+        self,
+        page: SvgPage,
+        painter: QPainter,
+        key: Key,
+        tile: Tile,
+        paperColor: Optional[QColor] = None
+    ) -> None:
         """Draw the specified tile of the page (coordinates in key) on painter."""
         # determine the part to draw; convert tile to viewbox
         viewbox = self.map(key, page._viewBox).mapRect(QRectF(*tile))
         target = QRectF(0, 0, tile.w, tile.h)
         if key.rotation & 1:
             target.setSize(target.size().transposed())
-        with locking.lock(page._svg):
+        with lock(page._svg):
             page._svg.setViewBox(viewbox)
             # we must specify the target otherwise QSvgRenderer scales to the
             # unrotated image
@@ -108,11 +117,5 @@ class SvgRenderer(render.AbstractRenderer):
             page._svg.setViewBox(page._viewBox)
 
 
-
-
 # install a default renderer, so SvgPage can be used directly
 SvgPage.renderer = SvgRenderer()
-
-
-
-

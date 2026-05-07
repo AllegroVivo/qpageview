@@ -25,13 +25,12 @@ Manages lists of rectangular objects and quickly finds them.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Sequence, Any, Optional, Tuple, Dict, List, TypeVar, Callable, Literal, Union, Set, Iterator, cast, Iterable
-
 import bisect
 import operator
-
-if TYPE_CHECKING:
-    pass
+from typing import (
+    Sequence, Any, Optional, Tuple, Dict, List, TypeVar,
+    Callable, Literal, Union, Set, Iterator, cast, Iterable
+)
 
 Left   = 0
 Top    = 1

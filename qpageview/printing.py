@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, List, Tuple, Optional
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Signal, QObject
 from PySide6.QtGui import QPainter, QTransform
 from PySide6.QtWidgets import QMessageBox, QProgressDialog, QWidget
 from PySide6.QtPrintSupport import QPrinter
@@ -56,7 +56,7 @@ class PrintJob(Job):
         self,
         printer: QPrinter,
         pageList: List[Tuple[int, AbstractPage]],
-        parent=None
+        parent: Optional[QObject] = None
     ):
         """Initialize with a QPrinter object and a list of pages.
 
