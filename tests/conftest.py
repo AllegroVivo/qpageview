@@ -1,6 +1,5 @@
 import pytest
 from PySide6.QtCore import QRect
-
 from PySide6.QtGui import QTransform
 
 from qpageview.util import Point

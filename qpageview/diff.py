@@ -25,12 +25,12 @@ A Page intended to display the visual difference between other pages.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Sequence, List, Optional, Type, Iterator
+from typing import TYPE_CHECKING, Sequence, List, Optional, Type, Iterator, Tuple, Union
 
 import itertools
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QPainter, QPixmap
+from PySide6.QtCore import Qt, QPoint
+from PySide6.QtGui import QColor, QPainter, QPixmap, QImage
 
 from .multipage import MultiPage, MultiPageDocument, MultiPageRenderer
 from .page import ImagePrintPageMixin, BlankPage
@@ -109,7 +109,11 @@ class DiffRenderer(MultiPageRenderer):
             QColor(Qt.GlobalColor.blue),
         ]
 
-    def combine(self, painter: QPainter, images: Sequence[QPixmap]) -> None:
+    def combine(
+        self,
+        painter: QPainter,
+        images: Sequence[Tuple[QPoint, Union[QPixmap, QImage]]]
+    ) -> None:
         """Paint images on the painter.
 
         We draw bottom-up, using Darken composition mode, so the lower images

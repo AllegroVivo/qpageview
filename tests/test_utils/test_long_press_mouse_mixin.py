@@ -7,7 +7,7 @@ from PySide6.QtWidgets import QWidget
 from qpageview.util import LongMousePressMixin
 
 
-class TestLongMousePressMixin(LongMousePressMixin, QWidget):
+class MockLongMousePressMixin(LongMousePressMixin, QWidget):
     def __init__(self):
         super().__init__()
         self.received = []
@@ -15,12 +15,13 @@ class TestLongMousePressMixin(LongMousePressMixin, QWidget):
         self.longMousePressTolerance = 3
 
     def longMousePressEvent(self, ev: QMouseEvent) -> None:
-        self.received.append((QPoint(ev.x(), ev.y()), ev.button(), ev.modifiers()))
+        pos = ev.position().toPoint()
+        self.received.append((QPoint(pos.x(), pos.y()), ev.button(), ev.modifiers()))
 
 
 @pytest.fixture(scope="function")
 def widget(qtbot):
-    w = TestLongMousePressMixin()
+    w = MockLongMousePressMixin()
     w.resize(200, 200)
     w.show()
     qtbot.addWidget(w)

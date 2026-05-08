@@ -1,18 +1,21 @@
+from pathlib import Path
+
 import pytest
-from PySide6.QtCore import Qt, QPoint, QRect
-from PySide6.QtGui import QTransform
+from PySide6.QtCore import Qt, QObject, Signal, QRect
+from PySide6.QtGui import QTransform, QImage, QColor
+from pytestqt.plugin import qapp
 
+from qpageview.constants import Rotate_0, Rotate_90, Rotate_180, Rotate_270
 from qpageview.util import (
-    rotate, Point, align, alignrect, clamp, clamp_int32
-)
-from qpageview.constants import (
-    Rotate_0, Rotate_90, Rotate_180, Rotate_270
+    rotate, Point, align, alignrect, clamp, clamp_int32,
+    signalsBlocked, autoCropRect, tempdir
 )
 
+
+### rotate Tests ###
 def _map_points(t, points):
     return [t.map(p) for p in points]
 
-### rotate Tests ###
 @pytest.mark.parametrize("rotation, expected", [
     (Rotate_0, [Point(0, 0), Point(10, 0), Point(0, 20)]),
     (Rotate_90, [Point(20, 0), Point(20, 10), Point(0, 0)]),
@@ -47,7 +50,6 @@ def test_rotate_dest_true_90_uses_dest_dimensions():
 def test_align_positions(alignment, expected):
     assert align(20, 10, 100, 60, alignment) == expected
 
-
 @pytest.mark.parametrize("w, h, expected", [
     (120, 10, (-1, 25)),
     (20, 80, (40, -1)),
@@ -74,12 +76,144 @@ def test_alignrect_positions(alignment, expected, offset_rect, offset_point):
     assert offset_rect.height() == 40
 
 ### clamp Tests ###
+@pytest.mark.parametrize("value, min_value, max_value, expected", [
+    (5, 0, 10, 5),
+    (-5, 0, 10, 0),
+    (15, 0, 10, 10),
+])
+def test_clamp(value, min_value, max_value, expected):
+    assert clamp(value, min_value, max_value) == expected
+
+### clamp_int32 Tests ###
+@pytest.mark.parametrize("value, expected", [
+    (0, 0),
+    (2**31 - 1, 2**31 - 1),
+    (-2**31, -2**31),
+    (2**31, 2**31 - 1),
+    (-2**31 - 1, -2**31),
+])
+def test_clamp_int32(value, expected):
+    assert clamp_int32(value) == expected
+
+### signalsBlocked Tests ###
+class _Emitter(QObject):
+    ping = Signal()
+
+    def __init__(self):
+        super().__init__()
+        self.count = 0
+        self.ping.connect(self._on_ping)
+
+    def _on_ping(self):
+        self.count += 1
+
+def test_signals_blocked_and_restored():
+    obj = _Emitter()
+    assert obj.signalsBlocked() is False
+
+    obj.ping.emit()
+    assert obj.count == 1
+
+    with signalsBlocked(obj):
+        assert obj.signalsBlocked() is True
+        obj.ping.emit()
+        assert obj.count == 1  # No change
+
+    assert obj.signalsBlocked() is False
+    obj.ping.emit()
+    assert obj.count == 2
+
+def test_signals_blocked_exception_safety():
+    obj = _Emitter()
+    assert obj.signalsBlocked() is False
+
+    with pytest.raises(RuntimeError, match="boom"):
+        with signalsBlocked(obj):
+            assert obj.signalsBlocked() is True
+            raise RuntimeError("boom")
+
+    assert obj.signalsBlocked() is False
+
+def test_signals_blocked_multiple():
+    a = _Emitter()
+    b = _Emitter()
+
+    b.blockSignals(True)
+    assert a.signalsBlocked() is False
+    assert b.signalsBlocked() is True
+
+    with signalsBlocked(a, b):
+        assert a.signalsBlocked() is True
+        assert b.signalsBlocked() is True
+
+    assert a.signalsBlocked() is False
+    assert b.signalsBlocked() is True  # Still blocked
+
+    b.blockSignals(False)
+
+def test_signals_blocked_no_args():
+    with signalsBlocked():
+        pass  # Should be a no-op and not raise any exceptions
 
 
+### autoCropRect Tests ###
+def _make_image(width, height, bg=QColor("white")):
+    image = QImage(width, height, QImage.Format.Format_ARGB32)
+    image.fill(bg)
+    return image
+
+def _paint_rect(image, rect, color=QColor("black")):
+    pixel = color.rgba()
+    for y in range(rect.y(), rect.y() + rect.height()):
+        for x in range(rect.x(), rect.x() + rect.width()):
+            image.setPixel(x, y, pixel)
+
+def test_autocroprect_uniform_image_null_rect(qapp):
+    image = _make_image(10, 10)
+    result = autoCropRect(image)
+
+    assert result == QRect()
+    assert result.isNull()
+
+def test_autocroprect_trim_symmetric_border(qapp):
+    image = _make_image(10, 10)
+    _paint_rect(image, QRect(2, 2, 6, 6))
+
+    assert autoCropRect(image) == QRect(2, 2, 6, 6)
+
+def test_autocroprect_trim_asymmetric_border(qapp):
+    image = _make_image(10, 10)
+    _paint_rect(image, QRect(1, 3, 9, 4))
+
+    assert autoCropRect(image) == QRect(1, 3, 9, 4)
+
+def test_autocroprect_corner_include_corner_artifact(qapp):
+    image = _make_image(8, 8)
+    _paint_rect(image, QRect(2, 2, 4, 4))
+    _paint_rect(image, QRect(0, 0, 1, 1))
+
+    assert autoCropRect(image) == QRect(0, 0, 6, 6)
 
 
+### tempdir Tests ###
+def test_tempdir_creates_and_cleans_up(qapp):
+    p = Path(tempdir())
 
+    assert p.exists()
+    assert p.is_dir()
 
+def test_tempdir_returns_unique(qapp):
+    first = Path(tempdir())
+    second = Path(tempdir())
 
+    assert first != second
+    assert first.exists() and first.is_dir()
+    assert second.exists() and second.is_dir()
 
+def test_tempdir_shared_parent(qapp):
+    first = Path(tempdir())
+    second = Path(tempdir())
 
+    assert first.parent == second.parent
+    assert first.parent.exists()
+    assert first.parent.is_dir()

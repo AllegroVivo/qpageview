@@ -16,6 +16,7 @@ All notable changes to the qpageview project are documented in this file.
 ### Changed
 
 * Migrate from PyQt6 to PySide6, which is now the default Qt binding for Python and has improved typehints for improved developer experience.
+* Remove access to Qt deprecated methods, such as QMouseEvent.pos().
 
 ### Fixed
 

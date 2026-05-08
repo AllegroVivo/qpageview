@@ -37,8 +37,6 @@ _runningJobs: Set["Job"] = set()
 _pendingJobs: List["Job"] = []
 maxjobs: int = 12
 
-FinalizeCallback = Optional[Callable[[Any], None]]
-
 class Job(QThread):
     """A simple wrapper around QThread.
 
@@ -53,7 +51,7 @@ class Job(QThread):
     callbacks: Set[Optional[Callable[[AbstractPage], None]]]
     mutex: Any
 
-    finalize: FinalizeCallback = None
+    finalize: Optional[Callable[[Any], None]] = None
     running: bool = False
     done: bool = False
     result: Optional[Any] = None
@@ -128,7 +126,11 @@ class SingleRun:
             j.finalize = None
             self._job = None
 
-    def __call__( self, func: Callable[[], Any], callback: FinalizeCallback = None) -> None:
+    def __call__(
+        self,
+        func: Callable[[], Any],
+        callback: Optional[Callable[[Any], None]] = None
+    ) -> None:
         self.cancel()
         j = self._job = Job()
         j.work = func
@@ -140,7 +142,10 @@ class SingleRun:
         j.start()
 
 
-def run(func: Callable[[], Any], callback: FinalizeCallback = None):
+def run(
+    func: Callable[[], Any],
+    callback: Optional[Callable[[Any], None]] = None
+) -> None:
     """Run specified function in a background thread.
 
     The thread is immediately started. If a callback is specified, it is called

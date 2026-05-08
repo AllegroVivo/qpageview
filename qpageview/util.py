@@ -152,12 +152,12 @@ class LongMousePressMixin:
             ev.globalPosition(), ev.button(), ev.buttons(),
             ev.modifiers()
         )
-        self._longPressPos = ev.pos()
+        self._longPressPos = ev.position().toPoint()
 
     def _checkLongMousePressEvent(self, ev: QMouseEvent) -> None:
         """Cancel the press event if the current event has moved more than 3 pixels."""
         if self._longPressTimer is not None:
-            dist = (self._longPressPos - ev.pos()).manhattanLength()
+            dist = (self._longPressPos - ev.position().toPoint()).manhattanLength()
             if dist > self.longMousePressTolerance:
                 self._cancelLongMousePressEvent()
 

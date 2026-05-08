@@ -2,9 +2,7 @@ import pytest
 from PySide6.QtCore import QPoint, QSize, QRect, QRectF, QPointF
 from PySide6.QtGui import QTransform
 
-from qpageview.util import (
-    Rectangular, MapToPage, MapFromPage, Point, clamp_int32
-)
+from qpageview.util import Rectangular, MapToPage, Point, clamp_int32
 
 ### Rectangular Tests ###
 @pytest.fixture(scope="function")
