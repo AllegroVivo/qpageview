@@ -223,7 +223,7 @@ class LinkViewMixin:
     def event(self, ev: QMouseEvent) -> bool:
         """Reimplemented to handle HelpEvent for links."""
         if self.linksEnabled and ev.type() in (QEvent.Type.ToolTip, QEvent.Type.WhatsThis):
-            page, link = self.linkAt(ev.pos())
+            page, link = self.linkAt(ev.position().toPoint())
             if link:
                 self.linkHelpEvent(ev, page, link)  # type: ignore - page is valid if link is valid - SP
                 return True
@@ -232,7 +232,7 @@ class LinkViewMixin:
     def mousePressEvent(self, ev: QMouseEvent) -> None:
         """Implemented to detect clicking a link and calling linkClickEvent()."""
         if self.linksEnabled:
-            page, link = self.linkAt(ev.pos())
+            page, link = self.linkAt(ev.position().toPoint())
             if link:
                 self.linkClickEvent(ev, page, link)  # type: ignore - page is valid if link is valid - SP
                 return

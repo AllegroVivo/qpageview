@@ -281,7 +281,7 @@ class ImageExporter(AbstractExporter):
             res *= self.oversample
         i = self.page().image(self._rect, res, res, self.paperColor)
         if self.oversample != 1:
-            i = i.scaled(i.size() / self.oversample, transformMode=Qt.TransformationMode.SmoothTransformation)
+            i = i.scaled(i.size() / self.oversample, mode=Qt.TransformationMode.SmoothTransformation)
         if self.grayscale:
             i = i.convertToFormat(QImage.Format.Format_Grayscale8)
         if self.autocrop:

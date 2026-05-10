@@ -148,18 +148,27 @@ class MultiPage(AbstractRenderedPage):
         yielded rect is always valid in that case.
 
         """
+        def _as_qrect(r):
+            if isinstance(r, QRect):
+                return r
+            if isinstance(r, QRectF):
+                return r.toRect()
+            return QRect(r)
+
         if not self.opaquePages:
             for p in self.pages:
-                yield p, rect & p.geometry()
+                pg = _as_qrect(p.geometry())
+                yield p, rect.intersected(pg)
         else:
             covered = QRegion()
             for p in self.pages:
-                overlayrect = rect & p.geometry()
+                pg = _as_qrect(p.geometry())
+                overlayrect = rect.intersected(pg)
                 if not overlayrect or not QRegion(overlayrect).subtracted(covered):
                     continue    # skip if this part is hidden below the other
                 covered += overlayrect
                 yield p, overlayrect
-                if not QRegion(rect).subtracted(covered):
+                if not QRegion(rect).subtracted(covered).isEmpty():
                     break
 
     def printablePagesAt(self, rect: QRectF) -> Iterator[Tuple[AbstractPage, QTransform]]:
@@ -227,15 +236,19 @@ class MultiPage(AbstractRenderedPage):
         """Reimplemented to find links in sub-pages."""
         result = []
         for p, rect in self._linkPages():
-            if point in rect:
+            if isinstance(rect, QRectF):
+                rect = rect.toRect()
+            if rect.contains(point):
                 result.extend(p.linksAt(point - p.pos()))
         return result
 
     def linksIn(self, rect: QRect) -> Set[Link]:
         """Reimplemented to find links in sub-pages."""
         result = set()
-        for p, rect in self._linkPages(rect):
-            result.update(p.linksIn(rect.translated(-p.pos())))
+        for p, r in self._linkPages(rect):
+            if isinstance(r, QRectF):
+                r = r.toRect()
+            result.update(p.linksIn(r.translated(-p.pos())))
         return result
 
     def linkRect(self, link: Link) -> QRectF:

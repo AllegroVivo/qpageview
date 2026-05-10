@@ -178,7 +178,7 @@ class Magnifier(QWidget):
         # magnifiers fully covers the viewport
         self.update()
 
-    def eventFilter(self, viewport: QWidget, ev: QEvent) -> bool:
+    def eventFilter(self, viewport: QWidget, ev: QMouseEvent) -> bool:
         """Handle events on the viewport of the View."""
         view: View = viewport.parent()  # type: ignore - this will always be present - SP
         if not self.isVisible():
@@ -188,7 +188,7 @@ class Magnifier(QWidget):
                 ev.button() == self.showbutton
             ):
                 # show and drag while button pressed: DRAG_SHORT
-                self.startShortDrag(ev.pos())
+                self.startShortDrag(ev.position().toPoint())
                 return True
         elif ev.type() == QEvent.Type.Paint:
             # if the viewport is painted, also update
@@ -201,19 +201,19 @@ class Magnifier(QWidget):
                 if ev.buttons() == self.showbutton | self.resizebutton:
                     # DRAG_SHORT is busy, both buttons are pressed: resize!
                     if self._resizepos is None:
-                        self._resizepos = ev.pos()
+                        self._resizepos = ev.position().toPoint()
                         self._resizewidth = self.width()
                         dy = 0
                     else:
-                        dy = (ev.pos() - self._resizepos).y()
+                        dy = (ev.position().toPoint() - self._resizepos).y()
                     g = self.geometry()
                     w = min(max(self.MIN_SIZE, self._resizewidth + 2 * dy), self.MAX_SIZE)
                     self.resize(w, w)
                     self.moveCenter(g.center())
                 else:
                     # just drag our center
-                    self.moveCenter(ev.pos())
-                    view.scrollForDragging(ev.pos())
+                    self.moveCenter(ev.position().toPoint())
+                    view.scrollForDragging(ev.position().toPoint())
                 return True
             elif ev.type() == QEvent.Type.MouseButtonRelease:
                 if ev.button() == self.showbutton:
@@ -234,14 +234,14 @@ class Magnifier(QWidget):
         if self._dragging == DRAG_SHORT:
             ev.ignore()
         elif not self._dragging and ev.button() == Qt.MouseButton.LeftButton:
-            self.startLongDrag(ev.pos())
+            self.startLongDrag(ev.position().toPoint())
 
     def mouseMoveEvent(self, ev: QMouseEvent) -> None:
         """Move the magnifier if we were dragging it."""
         ev.ignore()
         if self._dragging == DRAG_LONG:
             ev.accept()
-            pos = self.mapToParent(ev.pos())
+            pos = self.mapToParent(ev.position().toPoint())
             self.move(pos - self._dragpos)
             view: View = self.parent().parent()  # type: ignore - this will always be present - SP
             view.scrollForDragging(pos)

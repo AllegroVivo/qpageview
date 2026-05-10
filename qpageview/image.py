@@ -36,9 +36,10 @@ from PySide6.QtGui import QImage, QImageIOHandler, QImageReader, QTransform, QPa
 from .document import MultiSourceDocument
 from . import locking
 from .page import AbstractRenderedPage
+from .render import AbstractRenderer
 
 if TYPE_CHECKING:
-    from .render import AbstractRenderer, Key, Tile
+    from .render import Key, Tile
 
 class ImageContainer:
     """Represents an image, and is shared among copies of the "same" Page."""
@@ -175,7 +176,7 @@ class ImagePage(AbstractRenderedPage):
 
     def image(
         self,
-        rect: Optional[QRectF] = None,
+        rect: Optional[QRect] = None,
         dpiX: int = None,
         dpiY: int = None,
         paperColor: Optional[QColor] = None

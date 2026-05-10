@@ -40,9 +40,12 @@ def test_triggers_after_hold(widget, qtbot, offset_point):
 
 def test_no_trigger_if_released_early(widget, qtbot, offset_point):
     QTest.mousePress(widget, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, offset_point)
+
+    qtbot.waitUntil(lambda: widget._longPressTimer is not None, timeout=500)
     qtbot.wait(max(1, widget.longMousePressTime // 2))
+
     QTest.mouseRelease(widget, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, offset_point)
-    qtbot.wait(widget.longMousePressTime + 20)
+    qtbot.wait(widget.longMousePressTime + 40)
 
     assert len(widget.received) == 0
 
