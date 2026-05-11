@@ -127,7 +127,7 @@ class PrintProgressDialog(QProgressDialog):
         self.setRange(0, len(job.pageList))
         self.setLabelText("Preparing to print...")
 
-    def showProgress(self, page: AbstractPage, num: int, total: int) -> None:
+    def showProgress(self, page: int, num: int, total: int) -> None:
         """Called by the job when printing a page."""
         self.setValue(num)
         self.setLabelText(

@@ -138,7 +138,7 @@ class Rubberband(QWidget):
     def edge(self, point: QPoint) -> Edge:
         """Return the edge where the point touches our geometry."""
         rect = self.geometry()
-        if point not in rect:
+        if point not in rect.getCoords():
             return _OUTSIDE
         edge = 0
         if point.x() <= rect.left() + 8:
@@ -416,7 +416,7 @@ class Rubberband(QWidget):
 
     def mousePressEvent(self, ev: QMouseEvent) -> None:
         """Can start a new drag when we are clicked ourselves."""
-        pos = self.mapToParent(ev.pos())
+        pos = self.mapToParent(ev.position().toPoint())
         if not self._dragging:
             if ev.button() == self.dragbutton:
                 self.startDrag(pos, ev.button())
@@ -426,7 +426,7 @@ class Rubberband(QWidget):
 
     def mouseMoveEvent(self, ev: QMouseEvent) -> None:
         """Move if we are dragging; show the correct cursor shape on the edges."""
-        pos = self.mapToParent(ev.pos())
+        pos = self.mapToParent(ev.position().toPoint())
         if self._dragging:
             self.drag(pos)
         else:

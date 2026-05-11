@@ -55,7 +55,7 @@ from .locking import lock
 from .render import Tile, AbstractRenderer, Key
 
 if TYPE_CHECKING:
-    pass
+    from .document import DocumentSource
 
 FilenameType = Union[str, QByteArray, QPdfDocument]
 
@@ -224,7 +224,7 @@ class PdfDocument(SingleSourceDocument):
 
     def __init__(
         self,
-        source: Optional[QPdfDocument] = None,
+        source: Optional[DocumentSource] = None,
         renderer: Optional[AbstractRenderer] = None
     ):
         super().__init__(source, renderer)

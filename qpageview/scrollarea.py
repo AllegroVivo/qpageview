@@ -129,7 +129,7 @@ class ScrollArea(QAbstractScrollArea):
         kinetic scrolling is enabled).
 
         """
-        if rect not in self.visibleArea():
+        if rect not in self.visibleArea().getCoords():
             if margins is not None:
                 rect = rect + margins
             diff = self.offsetToEnsureVisible(rect)
