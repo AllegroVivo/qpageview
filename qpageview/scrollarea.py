@@ -321,7 +321,7 @@ class ScrollArea(QAbstractScrollArea):
                 diff = self._dragPos - ev.pos()
                 self._dragSpeed = (ev.timestamp() - self._dragTime, diff)
                 self.scrollBy(Point(diff.x(), diff.y()))
-            self._dragPos = ev.pos()
+            self._dragPos = ev.position().toPoint()
             self._dragTime = ev.timestamp()
         super().mouseMoveEvent(ev)
 

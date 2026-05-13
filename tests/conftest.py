@@ -1,8 +1,10 @@
 import pytest
-from PySide6.QtCore import QRect
-from PySide6.QtGui import QTransform
+from PySide6.QtCore import QRect, QByteArray, QBuffer, QIODevice, QSize
+from PySide6.QtGui import QTransform, QImage, QColor, QPainter
+from PySide6.QtSvg import QSvgGenerator
 
 from qpageview.util import Point
+from qpageview.view import View
 
 @pytest.fixture(scope="function")
 def identity_point():
@@ -28,16 +30,3 @@ def identity_rect():
 def offset_rect():
     """Fixture that provides a QRect with coordinates (10, 20) and size (30, 40)."""
     return QRect(10, 20, 30, 40)
-
-
-
-
-
-
-
-
-
-
-
-
-

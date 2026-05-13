@@ -148,7 +148,7 @@ class SelectorViewMixin:
         option.state |= QStyle.StateFlag.State_On if pageNum in self._selection else QStyle.StateFlag.State_Off
         scale = None
         # in the unlikely case the checkboxes are larger than the page, scale them down
-        if option.rect not in page.rect():
+        if option.rect not in page.rect().getCoords():
             scale = min(page.width / option.rect.width(), page.height / option.rect.height())
             painter.save()
             painter.scale(scale, scale)
@@ -159,7 +159,7 @@ class SelectorViewMixin:
     def mousePressEvent(self: SidebarView, ev: QMouseEvent) -> None:
         """Reimplemented to check if a checkbox was clicked."""
         if self._selectionMode and ev.buttons() == Qt.MouseButton.LeftButton:
-            pos = ev.pos() - self.layoutPosition()
+            pos = ev.position().toPoint() - self.layoutPosition()
             page = self._pageLayout.pageAt(pos)
             if page:
                 pageNum = self._pageLayout.index(page) + 1

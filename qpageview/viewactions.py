@@ -131,7 +131,7 @@ class ViewActions(QObject):
             'fit_height',
             'fit_both',
             'zoom_natural',
-            'zoom_original'
+            'zoom_original',
             'zoom_in',
             'zoom_out',
             'zoomer',
@@ -451,8 +451,8 @@ class PagerAction(QWidgetAction):
 
     createdWidgets: Callable[[], Tuple[QSpinBox, ...]]
 
-    def __init__(self, *args: Any, **kwargs: Any):
-        super().__init__(*args, **kwargs)
+    def __init__(self, parent: QObject):
+        super().__init__(parent)
         self._currentPage: int = 0
         self._pageCount: int = 0
         self._displayFormat: str = "{num} of {total}"
@@ -557,8 +557,8 @@ class ZoomerAction(QWidgetAction):
     zoomFactorChanged: Signal = Signal(float)
     viewModeChanged: Signal = Signal(int)
 
-    def __init__(self, *args: Any, **kwargs: Any):
-        super().__init__(*args, **kwargs)
+    def __init__(self, parent: QObject):
+        super().__init__(parent)
         self._zoomFactor: float = 1.0
         self._viewMode: ViewMode = FixedScale
         self._viewModes: Tuple[ViewModeTuple, ...] = (
